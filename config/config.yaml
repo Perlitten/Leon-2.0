@@ -1,0 +1,59 @@
+general:
+  symbol: "BTCUSDT"  # Торговая пара
+  update_interval: 5  # Интервал обновления в секундах
+  kline_interval: "1h"  # Интервал свечей
+  mode: "${TRADING_MODE}"  # Режим работы: dry/real/backtest - берется из .env
+  use_real_data: true  # Использовать реальные данные с биржи
+
+risk:
+  max_position_size: 0.01  # Максимальный размер позиции в BTC
+  max_loss_percent: 2.0  # Максимальный допустимый убыток в процентах
+  volatility_threshold: 0.05  # Порог волатильности
+  leverage: ${LEVERAGE}  # Кредитное плечо из .env
+  max_concurrent_positions: 5  # Максимальное количество одновременных позиций
+  max_positions_per_symbol: 2  # Максимальное количество позиций на одну пару
+  portfolio_risk_limit: 5.0  # Максимальный риск портфеля в процентах
+  capital_allocation:
+    high_confidence: 0.4  # Высокая уверенность - 40% доступного капитала
+    medium_confidence: 0.3  # Средняя уверенность - 30% доступного капитала
+    low_confidence: 0.1  # Низкая уверенность - 10% доступного капитала
+
+strategy:
+  name: "ml_based"  # Стратегия на основе ML
+  params:
+    confidence_threshold: 0.7  # Порог уверенности для входа в позицию
+    short_period: 9
+    long_period: 21
+    rsi_period: 14
+    rsi_overbought: 70
+    rsi_oversold: 30
+
+ml:
+  enabled: true  # Включить ML-компонент
+  model_type: "lstm"  # Тип модели
+  model_path: "ml/models/lstm_v1.h5"  # Путь к модели
+  feature_window: 24  # Окно признаков (количество свечей)
+  prediction_horizon: 3  # Горизонт прогнозирования
+
+binance:
+  api_key: "${BINANCE_API_KEY}"  # API ключ из .env
+  api_secret: "${BINANCE_API_SECRET}"  # API секрет из .env
+
+telegram:
+  enabled: true  # Включаем уведомления в Telegram
+  bot_token: "${TELEGRAM_BOT_TOKEN}"  # Токен берётся из .env
+  chat_id: "${TELEGRAM_CHAT_ID}"  # ID чата берётся из .env
+  notification_level: "all"  # Уровень уведомлений (all/trades/important)
+
+visualization:
+  enabled: true  # Включить визуализацию
+  console_ui: true  # Использовать консольный интерфейс
+  update_interval: 1  # Интервал обновления UI в секундах
+  chart_type: "candlestick"  # Тип графика (candlestick/line)
+
+backtest:
+  start_date: "2023-01-01"  # Начальная дата для бэктестинга
+  end_date: "2023-12-31"  # Конечная дата для бэктестинга
+  data_source: "binance"  # Источник данных
+
+initial_balance: ${INITIAL_BALANCE}  # Начальный баланс из .env

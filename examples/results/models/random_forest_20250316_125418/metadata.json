@@ -1,0 +1,24 @@
+{
+    "model_id": "random_forest_20250316_125418",
+    "model_type": "random_forest",
+    "task_type": "regression",
+    "created_at": "2025-03-16T12:54:18.055807",
+    "metrics": {
+        "mse": 0.530275761654883,
+        "rmse": 0.7282003581809632,
+        "r2": 0.6157388244475837,
+        "mae": 0.526235641407719
+    },
+    "feature_names": [
+        "MedInc",
+        "HouseAge",
+        "AveRooms",
+        "AveBedrms",
+        "Latitude"
+    ],
+    "dataset": "california_housing",
+    "preprocessing": {
+        "scaling": "standard",
+        "feature_selection": "k_best_regression"
+    }
+}

@@ -1,0 +1,17 @@
+{
+    "model_name": "random_forest_classifier",
+    "dataset_name": "breast_cancer_test",
+    "task_type": "classification",
+    "metrics": {
+        "accuracy": 0.40350877192982454,
+        "precision": 0.5283018867924528,
+        "recall": 0.39436619718309857,
+        "f1": 0.45161290322580644,
+        "roc_auc": 0.6007206026858828
+    },
+    "timestamp": "2025-03-16T12:56:24.947255",
+    "data_shape": [
+        114,
+        10
+    ]
+}

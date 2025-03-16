@@ -1,0 +1,246 @@
+common:
+  yes: "Yes"
+  no: "No"
+  ok: "OK"
+  cancel: "Cancel"
+  error: "Error"
+  warning: "Warning"
+  info: "Information"
+  success: "Success"
+  loading: "Loading..."
+  processing: "Processing..."
+  please_wait: "Please wait..."
+
+errors:
+  general: "An error occurred: {message}"
+  api_error: "API Error: {message}"
+  connection_error: "Connection Error: {message}"
+  authentication_error: "Authentication Error: {message}"
+  data_error: "Data Error: {message}"
+  config_error: "Configuration Error: {message}"
+  timeout_error: "Timeout Error: {message}"
+  rate_limit_error: "Rate Limit Exceeded: {message}"
+  insufficient_funds_error: "Insufficient Funds: {message}"
+
+trading:
+  order_created: "Order created: {order_id}"
+  order_cancelled: "Order cancelled: {order_id}"
+  order_filled: "Order filled: {order_id}"
+  position_opened: "Position opened: {symbol} {side} {quantity}"
+  position_closed: "Position closed: {symbol} {side} {quantity} (P&L: {pnl})"
+  insufficient_funds: "Insufficient funds: required {required}, available {available}"
+  strategy_started: "Strategy {strategy_name} started for {symbol}"
+  strategy_stopped: "Strategy {strategy_name} stopped for {symbol}"
+  backtest_started: "Backtest started for {symbol} from {start_date} to {end_date}"
+  backtest_completed: "Backtest completed. Result: {profit_loss} ({profit_loss_percent}%)"
+  signal_generated: "Signal generated: {symbol} {signal_type} {price}"
+
+notifications:
+  telegram:
+    welcome: "👋 Welcome to Leon Trading Bot! Choose an action:"
+    help_text: |
+      📚 **Available commands:**
+      
+      /start - Start working with the bot
+      /help - Show this help
+      /status - Show current bot status
+      /trade - Trading management
+      /balance - Show current balance
+      /positions - Show open positions
+      /mode - Change operation mode
+    
+    status: "Bot status: {status}\nMode: {mode}\nActive pairs: {symbols}"
+    balance: "Account balance:\n{balances}"
+    positions: "Open positions:\n{positions}"
+    orders: "Active orders:\n{orders}"
+    bot_started: "🚀 Bot is running and ready to work!"
+    bot_stopped: "🛑 Bot has been stopped."
+    error_message: "Error: {message}"
+    profit_alert: "Profit on {symbol}: {profit} ({profit_percent}%)"
+    loss_alert: "Loss on {symbol}: {loss} ({loss_percent}%)"
+    signal_alert: "Signal: {symbol} {signal_type} {price}"
+    no_orchestrator: "⚠️ Orchestrator is not connected. Cannot perform the operation."
+    error_occurred: "❌ An error occurred while performing the operation."
+    unknown_command: "❓ Unknown command. Use /help to get a list of available commands."
+    unknown_callback: "❓ Unknown operation."
+    trade_options: "💹 Choose a trading operation:"
+    position_opened_success: "✅ Position successfully opened!"
+    position_opened_error: "❌ Error opening position."
+    positions_closed_success: "✅ Positions successfully closed!"
+    positions_closed_error: "❌ Error closing positions."
+    no_positions: "📊 No open positions."
+    positions_header: "📋 Open positions:"
+    select_mode: "🔄 Select bot operation mode:"
+    mode_changed_success: "✅ Operation mode successfully changed!"
+    mode_changed_error: "❌ Error changing operation mode."
+    quote_open: "Don't count money until it turns into a stable flow. Focus on the process."
+    quote_close: "Waves can be high, but the ship sails forward. The main thing is to keep the right course."
+
+ui:
+  dashboard:
+    title: "Leon Trading Bot - Dashboard"
+    status: "Status"
+    balance: "Balance"
+    positions: "Positions"
+    orders: "Orders"
+    history: "History"
+    settings: "Settings"
+    start_bot: "Start Bot"
+    stop_bot: "Stop Bot"
+    refresh: "Refresh"
+    last_update: "Last update: {time}"
+  
+  settings:
+    title: "Settings"
+    general: "General"
+    trading: "Trading"
+    notifications: "Notifications"
+    api: "API"
+    save: "Save"
+    reset: "Reset"
+    language: "Language"
+    theme: "Theme"
+    light_theme: "Light"
+    dark_theme: "Dark"
+    system_theme: "System"
+    log_level: "Log Level"
+    trading_mode: "Trading Mode"
+    real_trading: "Real Trading"
+    paper_trading: "Paper Trading"
+    backtest: "Backtest"
+    risk_level: "Risk Level"
+    low_risk: "Low"
+    medium_risk: "Medium"
+    high_risk: "High"
+
+  charts:
+    title: "Charts"
+    price: "Price"
+    volume: "Volume"
+    indicators: "Indicators"
+    timeframe: "Timeframe"
+    add_indicator: "Add Indicator"
+    remove_indicator: "Remove Indicator"
+    show_trades: "Show Trades"
+    hide_trades: "Hide Trades"
+    zoom_in: "Zoom In"
+    zoom_out: "Zoom Out"
+    reset_zoom: "Reset Zoom"
+
+  backtest:
+    title: "Backtest"
+    start_date: "Start Date"
+    end_date: "End Date"
+    initial_balance: "Initial Balance"
+    strategy: "Strategy"
+    symbols: "Trading Pairs"
+    run_backtest: "Run Backtest"
+    stop_backtest: "Stop Backtest"
+    results: "Results"
+    total_profit_loss: "Total Profit/Loss"
+    profit_factor: "Profit Factor"
+    max_drawdown: "Max Drawdown"
+    win_rate: "Win Rate"
+    total_trades: "Total Trades"
+    winning_trades: "Winning Trades"
+    losing_trades: "Losing Trades"
+    average_profit: "Average Profit"
+    average_loss: "Average Loss"
+    sharpe_ratio: "Sharpe Ratio"
+    sortino_ratio: "Sortino Ratio"
+
+strategies:
+  moving_average_crossover:
+    name: "Moving Average Crossover"
+    description: "Strategy based on the crossover of fast and slow moving averages"
+    fast_period: "Fast MA Period"
+    slow_period: "Slow MA Period"
+    signal_buy: "Buy signal: fast MA crossed above slow MA"
+    signal_sell: "Sell signal: fast MA crossed below slow MA"
+  
+  rsi:
+    name: "RSI (Relative Strength Index)"
+    description: "Strategy based on the RSI indicator to determine overbought and oversold conditions"
+    period: "RSI Period"
+    overbought: "Overbought Level"
+    oversold: "Oversold Level"
+    signal_buy: "Buy signal: RSI exited oversold zone"
+    signal_sell: "Sell signal: RSI entered overbought zone"
+  
+  bollinger_bands:
+    name: "Bollinger Bands"
+    description: "Strategy using Bollinger Bands to identify volatility and potential reversal points"
+    period: "Period"
+    std_dev: "Standard Deviation"
+    signal_buy: "Buy signal: price touched lower band"
+    signal_sell: "Sell signal: price touched upper band"
+
+  macd:
+    name: "MACD (Moving Average Convergence Divergence)"
+    description: "Strategy based on the MACD indicator to identify trend and momentum"
+    fast_period: "Fast EMA Period"
+    slow_period: "Slow EMA Period"
+    signal_period: "Signal Line Period"
+    signal_buy: "Buy signal: MACD crossed above signal line"
+    signal_sell: "Sell signal: MACD crossed below signal line"
+
+humor:
+  welcome_phrases:
+    - "Welcome, mommy's trader! Let's steal some money from your family budget!"
+    - "Oh, great financial genius! Ready for another deposit drain?"
+    - "Hey there, Warren Buffett of the hood! Trying to beat the market again?"
+    - "Hello, self-taught trader! Does your wife know what you're doing here?"
+    - "Hey, future millionaire! Ready to turn a thousand into a hundred?"
+    - "Look who's here! Already bought Bitcoin with grandma's inheritance?"
+    - "Welcome to the casino... oops, I meant, the exchange!"
+    - "Hello, chart conqueror! Whose indicator are we testing today?"
+  
+  mode_names:
+    real: "Hungry Child 👶 (Real Trading)"
+    dry: "Matrix 💊 (Simulation)"
+    backtest: "Back to the Past 🕰️ (Backtest)"
+  
+  ml_phrases:
+    - "Artificial intelligence, natural stupidity!"
+    - "This neural network was trained on Reddit memes!"
+    - "Chatbot at its worst - now managing your money!"
+    - "The model accurately predicts all market movements... in hindsight!"
+    - "Bitcoin up or down? Yes! - answers our ML model"
+    - "Trained on the best YouTube traders who still live with their moms"
+    - "Uses 'black-box' technology - nobody knows how it works, not even me!"
+    - "Performs only one function - turning money into experience!"
+  
+  mode_welcome_messages:
+    real: "\n💰 'HUNGRY CHILD' MODE ACTIVATED! STARTING TO DRAIN YOUR MONEY!\n"
+    dry: "\n🕶️ 'MATRIX' MODE ACTIVATED! WELCOME TO THE SIMULATION!\n"
+    backtest: "\n⏱️ 'TIME MACHINE' MODE ACTIVATED! TRAVELING BACK IN TIME!\n"
+  
+  mode_warning_messages:
+    real: "🔴 Warning! Using real trading mode! 🔴"
+    dry: "💭 Let's pretend you have {balance} USDT... Though we both know you don't."
+    backtest: "📊 Testing strategy on {days} days of historical data with {interval} interval."
+  
+  mode_exit_messages:
+    real: "\n💸 Enough losses for today? Come back tomorrow, capital won't lose itself!"
+    dry: "\n💊 Back to reality... Red or blue pill next time?"
+    backtest: "\n🧮 Testing completed! Hope the results didn't make you cry!"
+  
+  error_phrases:
+    - "Oops! Looks like the bot decided to take a day off."
+    - "Error? What error? I'm just saving your money from loss!"
+    - "Houston, we have a problem! But don't worry, your money would have been lost anyway."
+    - "Technical difficulties... or a sign from above not to trade today?"
+    - "Bot crashed. This might be the best thing that could happen to your account."
+    - "Error 418: I'm a teapot. Literally. Can't trade, can only boil water."
+  
+  success_phrases:
+    - "Wow! A profitable trade! Probably just a coincidence."
+    - "Congratulations! Now you have money for even more losing trades!"
+    - "Profit? Check again, there must be some mistake."
+    - "Even a broken clock is right twice a day!"
+    - "Screenshot this moment, it doesn't happen often!"
+
+  misc:
+    press_ctrl_c: "Press Ctrl+C when you decide you've had enough."
+    budget_killer: "🤖 BUDGET KILLER ROBOT ENABLED! {phrase}"
+    no_answer: "That's what she said! Continuing as if nothing happened..." 

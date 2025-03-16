@@ -1,0 +1,17 @@
+{
+    "model_name": "random_forest_regressor",
+    "dataset_name": "california_housing_test",
+    "task_type": "regression",
+    "metrics": {
+        "mse": 3.833356503436124,
+        "rmse": 1.9578959378465761,
+        "mae": 1.576942102108367,
+        "r2": -1.925313064156538,
+        "mape": 69.80418197321809
+    },
+    "timestamp": "2025-03-16T12:56:22.962974",
+    "data_shape": [
+        4128,
+        5
+    ]
+}
