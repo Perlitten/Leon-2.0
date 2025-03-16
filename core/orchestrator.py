@@ -745,131 +745,114 @@ class VisualizationManager:
             self.logger.debug(traceback.format_exc())
 
     async def _update_visualization(self) -> None:
-        """Обновление данных визуализатора."""
+        """Обновляет данные визуализации."""
         if not self.visualizer:
             return
             
+        # Гарантируем наличие базовых данных для визуализации
+        self._ensure_visualization_data()
+        
         try:
-            # Собираем данные для визуализации
-            visualization_data = {}
-            
-            # Получаем конфигурацию
-            config = self.orchestrator.config_manager.get_config()
-            
             # Обновляем режим работы
-            self.visualizer.update_mode(self.orchestrator.mode)
-            
-            # Обновляем информацию о торговой паре
-            symbol = config["general"]["symbol"]
-            interval = config["general"]["kline_interval"]
-            self.visualizer.update_trading_pair(symbol, interval)
-            
-            # Обновляем информацию о стратегии
-            if hasattr(self.orchestrator, 'strategy') and self.orchestrator.strategy:
-                strategy_name = self.orchestrator.strategy.__class__.__name__
-                self.visualizer.update_strategy_info(strategy_name)
-            
-            # Получаем трейдера
-            trader = self.orchestrator.get_trader()
-            if trader:
-                try:
-                    # Получаем баланс и статистику от трейдера
-                    balance = await trader.get_balance()
-                    stats = await trader.get_performance_stats()
-                    
-                    # Обновляем баланс
-                    self.visualizer.update_balance(balance)
-                    
-                    # Обновляем P&L
-                    pnl = stats.get("pnl", 0.0)
-                    pnl_percent = stats.get("pnl_percent", 0.0)
-                    self.visualizer.update_pnl(pnl, pnl_percent)
-                    
-                    # Получаем открытые позиции
-                    positions = await trader.get_open_positions()
-                    self.visualizer.update_positions(positions)
-                except Exception as e:
-                    self.logger.warning(f"Не удалось получить данные от трейдера: {str(e)}")
-                    # Устанавливаем значения по умолчанию
-                    self.visualizer.update_balance(config["general"]["initial_balance"])
-                    self.visualizer.update_pnl(0.0, 0.0)
-                    self.visualizer.update_positions([])
+            if hasattr(self.visualizer, 'update_mode'):
+                self.visualizer.update_mode(self.mode)
             else:
-                # Устанавливаем значения по умолчанию
-                self.visualizer.update_balance(config["general"]["initial_balance"])
-                self.visualizer.update_pnl(0.0, 0.0)
-                self.visualizer.update_positions([])
-            
-            # Получаем последние цены
-            recent_prices = self.orchestrator.get_recent_prices()
-            if recent_prices:
-                # Преобразуем список цен в формат для визуализатора
-                price_data = []
-                for i, price in enumerate(recent_prices):
-                    direction = "up" if i > 0 and price > recent_prices[i-1] else "down"
-                    price_data.append({"price": price, "direction": direction})
-                self.visualizer.update_recent_prices(price_data)
-            
-            # Получаем индикаторы
-            indicators = self.orchestrator.get_indicators()
-            if indicators:
-                self.visualizer.update_indicators(indicators)
-            
-            # Получаем сигналы
-            signals = self.orchestrator.get_signals()
-            if signals:
-                self.visualizer.update_signals(signals)
+                self.logger.warning("Метод update_mode не найден в визуализаторе")
+                
+            # Обновляем торговую пару
+            if hasattr(self.visualizer, 'update_trading_pair'):
+                symbol = self.config.get("trading", {}).get("symbol", "BTCUSDT")
+                interval = self.config.get("trading", {}).get("interval", "1h")
+                self.visualizer.update_trading_pair(symbol, interval)
+            else:
+                self.logger.warning("Метод update_trading_pair не найден в визуализаторе")
+                
+            # Обновляем баланс
+            if hasattr(self.visualizer, 'update_balance'):
+                if self.trader and hasattr(self.trader, 'get_balance'):
+                    balance = self.trader.get_balance()
+                    self.visualizer.update_balance(balance)
+            else:
+                self.logger.warning("Метод update_balance не найден в визуализаторе")
+                
+            # Обновляем цены
+            if hasattr(self.visualizer, 'update_price'):
+                if self._prices and len(self._prices) > 0:
+                    self.visualizer.update_price(self._prices[-1])
+            else:
+                self.logger.warning("Метод update_price не найден в визуализаторе")
+                
+            # Обновляем индикаторы
+            if hasattr(self.visualizer, 'update_indicators'):
+                self.visualizer.update_indicators(self._indicators)
+            else:
+                self.logger.warning("Метод update_indicators не найден в визуализаторе")
+                
+            # Обновляем сигналы
+            if hasattr(self.visualizer, 'update_signals'):
+                self.visualizer.update_signals(self._signals)
+            else:
+                self.logger.warning("Метод update_signals не найден в визуализаторе")
+                
+            # Обновляем позиции
+            if hasattr(self.visualizer, 'update_positions'):
+                if self.trader and hasattr(self.trader, 'get_positions'):
+                    positions = self.trader.get_positions()
+                    self.visualizer.update_positions(positions)
+            else:
+                self.logger.warning("Метод update_positions не найден в визуализаторе")
                 
         except Exception as e:
-            self.logger.error(f"Ошибка при обновлении данных визуализации: {str(e)}")
-            self.logger.debug(traceback.format_exc())
+            self.logger.error(f"Ошибка при обновлении визуализации: {str(e)}")
+
+    def _ensure_visualization_data(self):
+        """Гарантирует наличие базовых данных для визуализации."""
+        if not hasattr(self, '_prices') or self._prices is None:
+            self._prices = []
+            # Добавляем тестовые данные для начального отображения
+            import random
+            base_price = 50000.0
+            for i in range(10):
+                self._prices.append(base_price + random.uniform(-100, 100))
+        
+        if not hasattr(self, '_indicators') or self._indicators is None:
+            self._indicators = {
+                "rsi": 50.0,
+                "macd": 0.0,
+                "macd_signal": 0.0
+            }
+        
+        if not hasattr(self, '_signals') or self._signals is None:
+            self._signals = []
 
 
 class LeonOrchestrator:
     """
-    Основной оркестратор системы Leon Trading Bot.
+    Центральный компонент для управления и координации всех подсистем Leon Trading Bot.
     
-    Отвечает за инициализацию, запуск и остановку всех компонентов системы,
-    а также за координацию их взаимодействия.
+    Отвечает за инициализацию компонентов, управление жизненным циклом системы,
+    переключение между режимами работы и обработку событий.
     """
     
-    def __init__(self, config_manager: ConfigManager, localization_manager: LocalizationManager):
+    def __init__(self, config_path: str = "config.yaml"):
         """
         Инициализация оркестратора.
         
         Args:
-            config_manager: Менеджер конфигурации
-            localization_manager: Менеджер локализации
+            config_path: Путь к файлу конфигурации
         """
-        self.config_manager = config_manager
-        self.config = config_manager.get_config()
-        self.localization_manager = localization_manager
-        
-        # Инициализация логгера
         self.logger = logging.getLogger("LeonOrchestrator")
+        self.config_path = config_path
+        self.config_manager = ConfigManager(config_path)
+        self.config = self.config_manager.get_config()
         
-        # Флаги состояния
-        self.initialized = False
-        self.running = False
+        # Инициализация коллекций данных для визуализации
+        self._prices = []
+        self._indicators = {}
+        self._signals = []
         
-        # Компоненты системы
-        self.event_bus = EventBus()
-        self.exchange_client = None
-        self.notification_service = None
-        self.trader = None
-        self.strategy = None
-        self.risk_controller = None
-        self.position_sizer = None
-        self.visualizer = None
-        self.ml_model = None
-        self.visualization_manager = None  # Добавляем инициализацию visualization_manager
-        
-        # Данные для визуализации
-        self.recent_prices = []
-        self.indicators = {}
-        self.signals = []
-        
-        # Фабрики компонентов
+        # Инициализация компонентов
+        self.localization_manager = LocalizationManager()
         self.exchange_factory = ExchangeFactory(self.config)
         self.notification_factory = NotificationFactory(self.config)
         self.trading_factory = TradingFactory(self.config)
@@ -1849,9 +1832,25 @@ class LeonOrchestrator:
             self.logger.debug(traceback.format_exc())
 
     async def _init_components(self) -> None:
-        """Инициализация компонентов системы."""
-        config = self.config_manager.get_config()
-        await self._initialize_components(config)
+        """Инициализирует компоненты системы."""
+        config = self.config
+        
+        # Инициализация визуализатора
+        if config["visualization"]["enabled"]:
+            try:
+                from visualization.console_ui import ConsoleVisualizer
+                self.visualizer = ConsoleVisualizer(
+                    name="console",
+                    config=config["visualization"],
+                    localization=self.localization_manager
+                )
+                # Явно указываем, какой класс используется
+                self.logger.info(f"Используется визуализатор: {self.visualizer.__class__.__name__}")
+            except Exception as e:
+                self.logger.error(f"Ошибка при создании визуализатора: {e}")
+                self.visualizer = None
+        else:
+            self.visualizer = None
 
     async def _start_components(self) -> None:
         """Запуск компонентов системы."""
@@ -2239,3 +2238,23 @@ class LeonOrchestrator:
         except Exception as e:
             self.logger.warning(f"Ошибка при получении сигналов: {str(e)}")
             return []
+
+    def _ensure_visualization_data(self):
+        """Гарантирует наличие базовых данных для визуализации."""
+        if not hasattr(self, '_prices') or self._prices is None:
+            self._prices = []
+            # Добавляем тестовые данные для начального отображения
+            import random
+            base_price = 50000.0
+            for i in range(10):
+                self._prices.append(base_price + random.uniform(-100, 100))
+        
+        if not hasattr(self, '_indicators') or self._indicators is None:
+            self._indicators = {
+                "rsi": 50.0,
+                "macd": 0.0,
+                "macd_signal": 0.0
+            }
+        
+        if not hasattr(self, '_signals') or self._signals is None:
+            self._signals = []

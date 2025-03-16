@@ -42,6 +42,18 @@ class ConsoleVisualizer(BaseVisualizer):
         self.running = False
         self.render_task = None
         
+        # Добавляем блокировку для потокобезопасного доступа к данным
+        self._data_lock = threading.Lock()
+        
+        # Инициализация коллекций данных
+        self.price_history = []
+        self.indicators = {}
+        self.signals = []
+        self.positions = []
+        self.balance = 0.0
+        self.mode = "unknown"
+        self.trading_pair = {"symbol": "BTCUSDT", "interval": "1h"}
+        
     def start(self) -> bool:
         """
         Запускает визуализатор.
@@ -86,7 +98,8 @@ class ConsoleVisualizer(BaseVisualizer):
             True, если данные успешно обновлены, иначе False
         """
         try:
-            self.data.update(data)
+            with self._data_lock:
+                self.data.update(data)
             return True
         except Exception as e:
             self.logger.error(f"Ошибка при обновлении данных: {str(e)}")
@@ -104,35 +117,21 @@ class ConsoleVisualizer(BaseVisualizer):
         Returns:
             True, если данные успешно обновлены, иначе False
         """
-        return self.update({"current_price": price})
-    
-    def update_balance(self, balance: float) -> bool:
-        """
-        Обновляет данные о балансе.
-        
-        Args:
-            balance: Текущий баланс
+        try:
+            with self._data_lock:
+                self.price_history.append(float(price))
+                # Ограничиваем размер истории цен
+                if len(self.price_history) > 100:
+                    self.price_history = self.price_history[-100:]
+                self.data["price"] = price
+            return True
+        except Exception as e:
+            self.logger.error(f"Ошибка при обновлении цены: {str(e)}")
+            return False
             
-        Returns:
-            True, если данные успешно обновлены, иначе False
-        """
-        return self.update({"balance": balance})
-    
-    def update_positions(self, positions: List[Dict[str, Any]]) -> bool:
-        """
-        Обновляет данные о позициях.
-        
-        Args:
-            positions: Список открытых позиций
-            
-        Returns:
-            True, если данные успешно обновлены, иначе False
-        """
-        return self.update({"positions": positions})
-    
     def update_indicators(self, indicators: Dict[str, Any]) -> bool:
         """
-        Обновляет данные об индикаторах.
+        Обновляет данные индикаторов.
         
         Args:
             indicators: Словарь с индикаторами
@@ -140,11 +139,18 @@ class ConsoleVisualizer(BaseVisualizer):
         Returns:
             True, если данные успешно обновлены, иначе False
         """
-        return self.update({"indicators": indicators})
-    
+        try:
+            with self._data_lock:
+                self.indicators.update(indicators)
+                self.data["indicators"] = self.indicators
+            return True
+        except Exception as e:
+            self.logger.error(f"Ошибка при обновлении индикаторов: {str(e)}")
+            return False
+            
     def update_signals(self, signals: List[Dict[str, Any]]) -> bool:
         """
-        Обновляет данные о сигналах.
+        Обновляет данные сигналов.
         
         Args:
             signals: Список сигналов
@@ -152,7 +158,91 @@ class ConsoleVisualizer(BaseVisualizer):
         Returns:
             True, если данные успешно обновлены, иначе False
         """
-        return self.update({"signals": signals})
+        try:
+            with self._data_lock:
+                self.signals = signals
+                self.data["signals"] = signals
+            return True
+        except Exception as e:
+            self.logger.error(f"Ошибка при обновлении сигналов: {str(e)}")
+            return False
+            
+    def update_positions(self, positions: List[Dict[str, Any]]) -> bool:
+        """
+        Обновляет данные позиций.
+        
+        Args:
+            positions: Список позиций
+            
+        Returns:
+            True, если данные успешно обновлены, иначе False
+        """
+        try:
+            with self._data_lock:
+                self.positions = positions
+                self.data["positions"] = positions
+            return True
+        except Exception as e:
+            self.logger.error(f"Ошибка при обновлении позиций: {str(e)}")
+            return False
+            
+    def update_balance(self, balance: float) -> bool:
+        """
+        Обновляет данные баланса.
+        
+        Args:
+            balance: Текущий баланс
+            
+        Returns:
+            True, если данные успешно обновлены, иначе False
+        """
+        try:
+            with self._data_lock:
+                self.balance = float(balance)
+                self.data["balance"] = self.balance
+            return True
+        except Exception as e:
+            self.logger.error(f"Ошибка при обновлении баланса: {str(e)}")
+            return False
+            
+    def update_mode(self, mode: str) -> bool:
+        """
+        Обновляет режим работы.
+        
+        Args:
+            mode: Режим работы
+            
+        Returns:
+            True, если данные успешно обновлены, иначе False
+        """
+        try:
+            with self._data_lock:
+                self.mode = mode
+                self.data["mode"] = mode
+            return True
+        except Exception as e:
+            self.logger.error(f"Ошибка при обновлении режима: {str(e)}")
+            return False
+            
+    def update_trading_pair(self, symbol: str, interval: str) -> bool:
+        """
+        Обновляет торговую пару.
+        
+        Args:
+            symbol: Символ торговой пары
+            interval: Интервал
+            
+        Returns:
+            True, если данные успешно обновлены, иначе False
+        """
+        try:
+            with self._data_lock:
+                self.trading_pair = {"symbol": symbol, "interval": interval}
+                self.data["trading_pair"] = self.trading_pair
+            return True
+        except Exception as e:
+            self.logger.error(f"Ошибка при обновлении торговой пары: {str(e)}")
+            return False
     
     def update_recent_prices(self, prices: List[Dict[str, Any]]) -> bool:
         """
@@ -190,31 +280,6 @@ class ConsoleVisualizer(BaseVisualizer):
             True, если данные успешно обновлены, иначе False
         """
         return self.update({"strategy_name": strategy_name})
-    
-    def update_trading_pair(self, symbol: str, interval: str) -> bool:
-        """
-        Обновляет информацию о торговой паре и интервале.
-        
-        Args:
-            symbol: Символ торговой пары
-            interval: Интервал свечей
-            
-        Returns:
-            True, если данные успешно обновлены, иначе False
-        """
-        return self.update({"symbol": symbol, "interval": interval})
-    
-    def update_mode(self, mode: str) -> bool:
-        """
-        Обновляет информацию о режиме работы.
-        
-        Args:
-            mode: Режим работы (real, dry, backtest)
-            
-        Returns:
-            True, если данные успешно обновлены, иначе False
-        """
-        return self.update({"mode": mode})
     
     def update_signals_data(self, signals_dict: Dict[str, Dict[str, Any]]) -> bool:
         """
