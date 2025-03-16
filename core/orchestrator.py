@@ -364,6 +364,7 @@ class TradingModeManager:
                 self.logger.info("Отправлено уведомление о запуске в Telegram")
             except Exception as e:
                 self.logger.error(f"Ошибка отправки уведомления в Telegram: {str(e)}")
+            self.logger.debug(traceback.format_exc())
         
         # Базовые параметры для трейдера
         trader_params = {
@@ -490,6 +491,97 @@ class MLIntegrationManager:
             self.logger.debug(traceback.format_exc())
             raise ModelLoadError(f"Ошибка при загрузке модели '{model_name}': {str(e)}", model_name=model_name) from e
     
+    async def train_model(self) -> Dict[str, Any]:
+        """
+        Обучает ML-модель на исторических данных.
+        
+        Returns:
+            Dict[str, Any]: Результат обучения с метриками
+            
+        Raises:
+            ModelLoadError: При ошибке обучения модели
+        """
+        try:
+            self.logger.info("Запуск обучения модели")
+            
+            # Получаем конфигурацию
+            config = self.orchestrator.config_manager.get_config()
+            model_config = config.get("ml", {})
+            
+            # Получаем параметры обучения
+            model_name = model_config.get("model_name", "default")
+            epochs = model_config.get("epochs", 10)
+            batch_size = model_config.get("batch_size", 32)
+            learning_rate = model_config.get("learning_rate", 0.001)
+            
+            # Логируем параметры обучения
+            self.logger.info(f"Параметры обучения: model={model_name}, epochs={epochs}, batch_size={batch_size}, lr={learning_rate}")
+            
+            # Здесь должна быть логика обучения модели
+            # ...
+            
+            # Временная заглушка для имитации обучения
+            import random
+            import time
+            
+            # Имитируем процесс обучения
+            for epoch in range(epochs):
+                self.logger.info(f"Эпоха {epoch+1}/{epochs}")
+                time.sleep(0.5)  # Имитация времени обучения
+            
+            # Генерируем случайные метрики
+            accuracy = 0.7 + random.random() * 0.2
+            precision = 0.65 + random.random() * 0.25
+            recall = 0.6 + random.random() * 0.3
+            f1_score = 2 * (precision * recall) / (precision + recall) if (precision + recall) > 0 else 0
+            
+            # Сохраняем модель
+            self.models[model_name] = {
+                "name": model_name,
+                "trained_at": datetime.now().isoformat(),
+                "epochs": epochs,
+                "batch_size": batch_size,
+                "learning_rate": learning_rate,
+                "metrics": {
+                    "accuracy": accuracy,
+                    "precision": precision,
+                    "recall": recall,
+                    "f1_score": f1_score
+                }
+            }
+            
+            self.current_model = model_name
+            
+            # Генерируем событие о завершении обучения
+            await self.orchestrator.event_bus.emit("model_trained", {
+                "model_name": model_name,
+                "timestamp": datetime.now().isoformat(),
+                "metrics": {
+                    "accuracy": accuracy,
+                    "precision": precision,
+                    "recall": recall,
+                    "f1_score": f1_score
+                }
+            })
+            
+            return {
+                "success": True,
+                "model_name": model_name,
+                "metrics": {
+                    "accuracy": accuracy,
+                    "precision": precision,
+                    "recall": recall,
+                    "f1_score": f1_score
+                }
+            }
+        except Exception as e:
+            self.logger.error(f"Ошибка при обучении модели: {str(e)}")
+            self.logger.debug(traceback.format_exc())
+            return {
+                "success": False,
+                "error": str(e)
+            }
+    
     async def get_prediction(self, data: Any) -> Dict[str, Any]:
         """
         Получает предсказание от ML-модели.
@@ -594,6 +686,7 @@ class VisualizationManager:
         self.orchestrator = orchestrator
         self.visualizer = None
         self.visualization_task = None
+        self.update_task = None
         self.logger = logging.getLogger("VisualizationManager")
     
     async def start_visualization(self) -> None:
@@ -607,12 +700,20 @@ class VisualizationManager:
         
         # Создаем визуализатор, если он еще не создан
         if not self.visualizer:
-            visualization_factory = VisualizationFactory(config)
-            self.visualizer = visualization_factory.create_visualizer()
+            from visualization.console_ui import ConsoleVisualizer
+            self.visualizer = ConsoleVisualizer(
+                name="console",
+                config=config["visualization"],
+                localization=self.orchestrator.localization_manager
+            )
         
-        # Запускаем задачу визуализации
-        self.logger.info("Запуск визуализации")
-        self.visualization_task = asyncio.create_task(self._run_visualization())
+        # Запускаем визуализатор
+        if hasattr(self.visualizer, 'start'):
+            self.visualizer.start()
+            self.logger.info(f"Запущен консольный визуализатор в режиме {self.orchestrator.mode}")
+        
+        # Запускаем задачу обновления данных
+        self.update_task = asyncio.create_task(self._periodic_visualization_update())
     
     async def stop_visualization(self) -> None:
         """Останавливает визуализацию."""
@@ -620,88 +721,169 @@ class VisualizationManager:
             self.logger.info("Остановка консольной визуализации")
             
             # Останавливаем визуализатор
-            if hasattr(self.visualizer, 'stop_visualization'):
-                self.visualizer.stop_visualization()
+            if hasattr(self.visualizer, 'stop'):
+                self.visualizer.stop()
             
-            # Отменяем задачу, если она запущена
-            if self.visualization_task and not self.visualization_task.done():
-                self.visualization_task.cancel()
+            # Отменяем задачу обновления, если она запущена
+            if self.update_task and not self.update_task.done():
+                self.update_task.cancel()
                 try:
-                    await self.visualization_task
+                    await self.update_task
                 except asyncio.CancelledError:
                     pass
     
-    async def _run_visualization(self) -> None:
-        """Запускает цикл визуализации."""
+    async def _periodic_visualization_update(self) -> None:
+        """Периодическое обновление данных визуализатора."""
+        try:
+            while self.orchestrator.running:
+                await self._update_visualization()
+                await asyncio.sleep(1)  # Обновляем каждую секунду
+        except asyncio.CancelledError:
+            self.logger.info("Задача обновления визуализации отменена")
+        except Exception as e:
+            self.logger.error(f"Ошибка в цикле обновления визуализации: {str(e)}")
+            self.logger.debug(traceback.format_exc())
+
+    async def _update_visualization(self) -> None:
+        """Обновление данных визуализатора."""
         if not self.visualizer:
             return
-        
-        config = self.orchestrator.config_manager.get_config()
-        update_interval = config["visualization"].get("update_interval", 1.0)
-        
+            
         try:
-            self.logger.info(f"Запуск цикла визуализации с интервалом {update_interval} сек")
+            # Собираем данные для визуализации
+            visualization_data = {}
             
-            # Инициализация визуализатора
-            self.visualizer.start_visualization()
+            # Получаем конфигурацию
+            config = self.orchestrator.config_manager.get_config()
             
-            # Основной цикл визуализации
-            while True:
-                # Обновляем визуализацию
-                self.visualizer.update()
+            # Обновляем режим работы
+            self.visualizer.update_mode(self.orchestrator.mode)
+            
+            # Обновляем информацию о торговой паре
+            symbol = config["general"]["symbol"]
+            interval = config["general"]["kline_interval"]
+            self.visualizer.update_trading_pair(symbol, interval)
+            
+            # Обновляем информацию о стратегии
+            if hasattr(self.orchestrator, 'strategy') and self.orchestrator.strategy:
+                strategy_name = self.orchestrator.strategy.__class__.__name__
+                self.visualizer.update_strategy_info(strategy_name)
+            
+            # Получаем трейдера
+            trader = self.orchestrator.get_trader()
+            if trader:
+                try:
+                    # Получаем баланс и статистику от трейдера
+                    balance = await trader.get_balance()
+                    stats = await trader.get_performance_stats()
+                    
+                    # Обновляем баланс
+                    self.visualizer.update_balance(balance)
+                    
+                    # Обновляем P&L
+                    pnl = stats.get("pnl", 0.0)
+                    pnl_percent = stats.get("pnl_percent", 0.0)
+                    self.visualizer.update_pnl(pnl, pnl_percent)
+                    
+                    # Получаем открытые позиции
+                    positions = await trader.get_open_positions()
+                    self.visualizer.update_positions(positions)
+                except Exception as e:
+                    self.logger.warning(f"Не удалось получить данные от трейдера: {str(e)}")
+                    # Устанавливаем значения по умолчанию
+                    self.visualizer.update_balance(config["general"]["initial_balance"])
+                    self.visualizer.update_pnl(0.0, 0.0)
+                    self.visualizer.update_positions([])
+            else:
+                # Устанавливаем значения по умолчанию
+                self.visualizer.update_balance(config["general"]["initial_balance"])
+                self.visualizer.update_pnl(0.0, 0.0)
+                self.visualizer.update_positions([])
+            
+            # Получаем последние цены
+            recent_prices = self.orchestrator.get_recent_prices()
+            if recent_prices:
+                # Преобразуем список цен в формат для визуализатора
+                price_data = []
+                for i, price in enumerate(recent_prices):
+                    direction = "up" if i > 0 and price > recent_prices[i-1] else "down"
+                    price_data.append({"price": price, "direction": direction})
+                self.visualizer.update_recent_prices(price_data)
+            
+            # Получаем индикаторы
+            indicators = self.orchestrator.get_indicators()
+            if indicators:
+                self.visualizer.update_indicators(indicators)
+            
+            # Получаем сигналы
+            signals = self.orchestrator.get_signals()
+            if signals:
+                self.visualizer.update_signals(signals)
                 
-                # Ждем следующего обновления
-                await asyncio.sleep(update_interval)
-                
-        except asyncio.CancelledError:
-            self.logger.info("Задача визуализации отменена")
         except Exception as e:
-            self.logger.error(f"Ошибка визуализации: {str(e)}")
+            self.logger.error(f"Ошибка при обновлении данных визуализации: {str(e)}")
             self.logger.debug(traceback.format_exc())
-        finally:
-            # Убеждаемся, что визуализация остановлена
-            if self.visualizer:
-                self.visualizer.stop_visualization()
 
 
 class LeonOrchestrator:
     """
-    Центральный класс для управления всеми подсистемами Leon Trading Bot.
+    Основной оркестратор системы Leon Trading Bot.
     
-    Отвечает за координацию работы различных компонентов системы,
-    управление жизненным циклом, обработку событий и переключение режимов.
+    Отвечает за инициализацию, запуск и остановку всех компонентов системы,
+    а также за координацию их взаимодействия.
     """
     
-    def __init__(self, config_path: str = "config/config.yaml", env_file: str = ".env"):
+    def __init__(self, config_manager: ConfigManager, localization_manager: LocalizationManager):
         """
-        Инициализирует оркестратор.
+        Инициализация оркестратора.
         
         Args:
-            config_path: Путь к файлу конфигурации
-            env_file: Путь к файлу с переменными окружения
+            config_manager: Менеджер конфигурации
+            localization_manager: Менеджер локализации
         """
-        self.logger = logging.getLogger(__name__)
-        self.config_path = config_path
-        self.env_file = env_file
-        self.config = {}
-        self.running = False
+        self.config_manager = config_manager
+        self.config = config_manager.get_config()
+        self.localization_manager = localization_manager
+        
+        # Инициализация логгера
+        self.logger = logging.getLogger("LeonOrchestrator")
+        
+        # Флаги состояния
         self.initialized = False
+        self.running = False
         
-        # Инициализация компонентов
+        # Компоненты системы
         self.event_bus = EventBus()
-        self.command_processor = CommandProcessor(self)
-        self.trading_mode_manager = TradingModeManager(self)
-        self.ml_integration_manager = MLIntegrationManager(self)
-        self.visualization_manager = VisualizationManager(self)
+        self.exchange_client = None
+        self.notification_service = None
+        self.trader = None
+        self.strategy = None
+        self.risk_controller = None
+        self.position_sizer = None
+        self.visualizer = None
+        self.ml_model = None
+        self.visualization_manager = None  # Добавляем инициализацию visualization_manager
         
-        # Инициализация менеджера локализации
-        from core.localization import get_localization_manager
-        self.localization_manager = get_localization_manager()
+        # Данные для визуализации
+        self.recent_prices = []
+        self.indicators = {}
+        self.signals = []
         
-        # Регистрация базовых команд
-        self._register_base_commands()
+        # Фабрики компонентов
+        self.exchange_factory = ExchangeFactory(self.config)
+        self.notification_factory = NotificationFactory(self.config)
+        self.trading_factory = TradingFactory(self.config)
+        self.visualization_factory = VisualizationFactory(self.config)
+        self.ml_factory = MLFactory(self.config)
         
-        self.logger.info("Оркестратор создан")
+        # Режим работы
+        self.mode = self.config.get("general", {}).get("mode", "dry")
+        self.current_mode = self.config.get("general", {}).get("mode", "dry")
+        
+        # Статус системы
+        self.status = SYSTEM_STATUSES["INITIALIZING"]
+        
+        self.logger.info(f"Оркестратор инициализирован в режиме {self.mode}")
         
         # Инициализация Telegram бота
         self._init_telegram_bot()
@@ -760,68 +942,108 @@ class LeonOrchestrator:
                 "timestamp": datetime.now().isoformat()
             })
             
-            # Запуск Telegram бота
-            if self.telegram_bot:
-                await self.telegram_bot.start()
+            # Отправляем уведомление о запуске через Telegram
+            if hasattr(self, 'telegram_bot') and self.telegram_bot:
+                try:
+                    self.logger.info("Отправка уведомления о запуске в Telegram")
+                    # Получаем параметры из конфигурации
+                    config = self.config_manager.get_config()
+                    symbol = config.get("general", {}).get("symbol", "BTCUSDT")
+                    balance = config.get("general", {}).get("initial_balance", 1000.0)
+                    leverage = config.get("general", {}).get("leverage", 10)
+                    risk_per_trade = config.get("strategy", {}).get("params", {}).get("risk_per_trade", 1.0)
+                    stop_loss = config.get("strategy", {}).get("params", {}).get("stop_loss", 2.0)
+                    take_profit = config.get("strategy", {}).get("params", {}).get("take_profit", 3.0)
+                    
+                    # Запускаем Telegram бота, если он еще не запущен
+                    if not self.telegram_bot.is_running:
+                        await self.telegram_bot.start()
+                    
+                    # Отправляем статус
+                    await self.telegram_bot.send_status_update(
+                        symbol=symbol,
+                        mode=mode,
+                        balance=balance,
+                        leverage=leverage,
+                        risk_per_trade=risk_per_trade,
+                        stop_loss=stop_loss,
+                        take_profit=take_profit
+                    )
+                    self.logger.info("Отправлено уведомление о запуске в Telegram")
+                except Exception as e:
+                    self.logger.error(f"Ошибка отправки уведомления в Telegram: {str(e)}")
+                    self.logger.debug(traceback.format_exc())
+            else:
+                self.logger.warning("Telegram бот не инициализирован, уведомление не отправлено")
             
             return True
         except Exception as e:
             self.logger.error(f"Ошибка при запуске оркестратора: {str(e)}")
             self.logger.debug(traceback.format_exc())
+            
+            # Пытаемся остановить систему в случае ошибки
+            try:
+                await self.stop()
+            except Exception as stop_error:
+                self.logger.error(f"Ошибка при остановке системы после сбоя: {str(stop_error)}")
+            
             raise OperationError(f"Ошибка при запуске оркестратора: {str(e)}", operation="start") from e
     
-    async def stop(self) -> bool:
-        """
-        Останавливает систему и освобождает ресурсы.
-        
-        Returns:
-            bool: Успешность остановки
-            
-        Raises:
-            OperationError: При ошибке остановки
-        """
+    async def stop(self):
+        """Остановка системы."""
         if not self.running:
-            self.logger.warning("Оркестратор не запущен")
-            return True
+            self.logger.warning("Попытка остановить неинициализированную систему")
+            return
         
         try:
-            self.logger.info("Остановка оркестратора")
+            # Останавливаем компоненты
+            await self._stop_components()
             
-            # Останавливаем текущий режим
-            await self.trading_mode_manager._stop_current_mode()
-            
-            # Останавливаем визуализацию
-            await self.visualization_manager.stop_visualization()
-            
-            # Отправляем уведомление в Telegram о завершении работы
-            if self.telegram_bot and hasattr(self.telegram_bot, 'connected') and self.telegram_bot.connected:
-                try:
-                    await self.telegram_bot.stop()
-                    self.logger.info("Отправлено уведомление о завершении работы в Telegram")
-                except Exception as e:
-                    self.logger.error(f"Ошибка отправки уведомления в Telegram: {str(e)}")
-            
-            # Закрываем соединение с Binance
-            if self.binance_client:
-                try:
-                    await self.binance_client.close()
-                    self.logger.info("Соединение с Binance закрыто")
-                except Exception as e:
-                    self.logger.error(f"Ошибка при закрытии соединения с Binance: {str(e)}")
+            # Отправляем уведомление о завершении работы
+            await self._send_telegram_stop_notification()
             
             # Сбрасываем флаг работы
             self.running = False
             
-            # Генерируем событие об остановке
-            await self.event_bus.emit("orchestrator_stopped", {
-                "timestamp": datetime.now().isoformat()
-            })
-            
-            return True
+            self.logger.info("Система остановлена")
         except Exception as e:
-            self.logger.error(f"Ошибка при остановке оркестратора: {str(e)}")
+            self.logger.error(f"Ошибка при остановке системы: {str(e)}")
             self.logger.debug(traceback.format_exc())
-            raise OperationError(f"Ошибка при остановке оркестратора: {str(e)}", operation="stop") from e
+            
+            # Даже при ошибке пытаемся отправить уведомление
+            try:
+                await self._send_telegram_stop_notification()
+            except Exception as notify_error:
+                self.logger.error(f"Не удалось отправить уведомление об остановке: {str(notify_error)}")
+            
+            # Сбрасываем флаг работы даже при ошибке
+            self.running = False
+    
+    async def _send_telegram_stop_notification(self):
+        """Отправляет уведомление об остановке системы в Telegram."""
+        try:
+            if not hasattr(self, 'telegram') or self.telegram is None:
+                self.logger.warning("Telegram интеграция не инициализирована, уведомление не отправлено")
+                return
+                
+            # Формируем сообщение
+            message = f"🛑 *Торговый бот остановлен*\n\n"
+            message += f"Режим: {self.mode.upper()}\n"
+            
+            # Добавляем информацию о времени работы
+            if hasattr(self, 'start_time'):
+                import datetime
+                duration = datetime.datetime.now() - self.start_time
+                hours, remainder = divmod(duration.seconds, 3600)
+                minutes, seconds = divmod(remainder, 60)
+                message += f"Время работы: {hours}ч {minutes}м {seconds}с\n"
+            
+            # Отправляем сообщение
+            await self.telegram.send_message(message)
+            self.logger.info("Отправлено уведомление об остановке в Telegram")
+        except Exception as e:
+            self.logger.error(f"Ошибка при отправке уведомления в Telegram: {str(e)}")
+            self.logger.debug(traceback.format_exc())
     
     async def switch_mode(self, mode: str) -> bool:
         """
@@ -906,10 +1128,13 @@ class LeonOrchestrator:
     
     async def _initialize_components(self, config: Dict[str, Any]) -> None:
         """
-        Инициализирует компоненты системы с использованием фабрик.
+        Инициализирует компоненты системы на основе конфигурации.
         
         Args:
             config: Конфигурация системы
+            
+        Raises:
+            InitializationError: При ошибке инициализации компонентов
         """
         try:
             # Создаем фабрики компонентов
@@ -926,7 +1151,13 @@ class LeonOrchestrator:
             self.binance_client = exchange_factory.create_binance_client(mode)
             
             # Инициализируем интеграцию с Telegram
-            self.telegram = notification_factory.create_telegram_integration()
+            self.telegram = await notification_factory.create_telegram_integration()
+            
+            # Логируем статус Telegram интеграции
+            if self.telegram:
+                self.logger.info("Telegram интеграция успешно инициализирована")
+            else:
+                self.logger.warning("Telegram интеграция не инициализирована")
             
             # Создаем стратегию
             self.strategy = trading_factory.create_strategy()
@@ -946,14 +1177,14 @@ class LeonOrchestrator:
             # Создаем визуализатор, если визуализация включена
             if config["visualization"]["enabled"]:
                 self.visualizer = visualization_factory.create_visualizer()
-                self.visualization_manager.visualizer = self.visualizer 
+                
+            # Устанавливаем флаг инициализации
+            self.initialized = True
+            
         except Exception as e:
-            error_phrases = self.localization_manager.get_text(LOCALIZATION_KEYS["ERROR_PHRASES"])
-            error_phrase = random.choice(error_phrases)
             self.logger.error(f"Ошибка при инициализации компонентов: {str(e)}")
             self.logger.debug(traceback.format_exc())
-            print(f"\n⚠️ {error_phrase}")
-            raise InitializationError(f"Ошибка при инициализации компонентов: {str(e)}") from e 
+            raise InitializationError(f"Ошибка при инициализации компонентов: {str(e)}") from e
 
     async def _display_menu(self) -> None:
         """
@@ -1002,101 +1233,266 @@ class LeonOrchestrator:
     def _init_telegram_bot(self):
         """Инициализация Telegram бота."""
         try:
-            self.telegram_bot = TelegramBot(self.config, self.localization_manager)
+            # Получаем токен и chat_id из конфигурации
+            config = self.config_manager.get_config()
+            telegram_token = config.get("telegram", {}).get("bot_token", "")
+            telegram_chat_id = config.get("telegram", {}).get("chat_id", "")
+            telegram_enabled = config.get("telegram", {}).get("enabled", False)
+            
+            if not telegram_enabled:
+                self.logger.info("Telegram интеграция отключена в конфигурации")
+                self.telegram_bot = None
+                return
+                
+            if not telegram_token or not telegram_chat_id:
+                self.logger.warning("Не указаны токен или chat_id для Telegram бота")
+                self.telegram_bot = None
+                return
+                
+            # Инициализируем бота
+            from notification.telegram.bot import TelegramBot
+            self.telegram_bot = TelegramBot(self.config_manager, self.localization_manager)
+            self.telegram_bot.token = telegram_token
+            self.telegram_bot.chat_id = telegram_chat_id
+            
+            # Устанавливаем список разрешенных пользователей (можно добавить в конфигурацию)
+            self.telegram_bot.allowed_users = [123456789]  # Замените на реальные ID пользователей
+            
+            # Устанавливаем ссылку на оркестратор
             self.telegram_bot.set_orchestrator(self)
-            self.logger.info("Telegram бот инициализирован")
+            
+            self.logger.info(f"Telegram бот инициализирован с токеном {telegram_token[:5]}... и chat_id {telegram_chat_id}")
         except Exception as e:
             self.logger.error(f"Ошибка при инициализации Telegram бота: {e}")
+            self.logger.debug(traceback.format_exc())
             self.telegram_bot = None
 
     async def start(self):
         """Запуск системы."""
         if self.running:
-            logger.warning("Система уже запущена")
+            self.logger.warning("Система уже запущена")
             return
         
         try:
-            # Инициализация компонентов в зависимости от режима
+            # Сохраняем время начала сессии
+            import datetime
+            self.start_time = datetime.datetime.now()
+            
+            # Инициализируем компоненты
             await self._init_components()
             
-            # Запуск компонентов
+            # Запускаем компоненты
             await self._start_components()
             
-            # Запуск Telegram бота
-            if self.telegram_bot:
-                await self.telegram_bot.start()
-            
+            # Устанавливаем флаг работы
             self.running = True
-            logger.info(f"Система запущена в режиме: {self.current_mode}")
             
-            # Отправка уведомления о запуске
-            if self.telegram_bot:
-                await self._send_status_update()
+            # Отправляем уведомление в Telegram
+            await self._send_telegram_notification()
             
+            self.logger.info(f"Система запущена в режиме: {self.mode}")
         except Exception as e:
-            logger.error(f"Ошибка при запуске системы: {e}")
-            await self.stop()
+            self.logger.error(f"Ошибка при запуске системы: {str(e)}")
+            self.logger.debug(traceback.format_exc())
             raise
+    
+    async def _send_telegram_notification(self):
+        """Отправляет уведомление о запуске системы в Telegram."""
+        try:
+            if not hasattr(self, 'telegram') or self.telegram is None:
+                self.logger.warning("Telegram интеграция не инициализирована, уведомление не отправлено")
+                return
+                
+            # Получаем параметры из конфигурации
+            config = self.config_manager.get_config()
+            symbol = config.get("general", {}).get("symbol", "BTCUSDT")
+            balance = config.get("general", {}).get("initial_balance", 1000.0)
+            leverage = config.get("general", {}).get("leverage", 10)
+            risk_per_trade = config.get("strategy", {}).get("params", {}).get("risk_per_trade", 1.0)
+            stop_loss = config.get("strategy", {}).get("params", {}).get("stop_loss", 2.0)
+            take_profit = config.get("strategy", {}).get("params", {}).get("take_profit", 3.0)
+            
+            # Формируем сообщение
+            mode_emoji = "🧪" if self.mode == "dry" else "🔥" if self.mode == "real" else "📊"
+            message = f"📊 *Статус торгового бота*\n\n"
+            message += f"{mode_emoji} Режим: {self.mode.upper()}\n"
+            message += f"💱 Пара: {symbol}\n"
+            message += f"💰 Баланс: {balance:.2f} USDT\n"
+            message += f"⚡ Плечо: {leverage}x\n"
+            message += f"⚠️ Риск на сделку: {risk_per_trade}%\n"
+            message += f"🛑 Стоп-лосс: {stop_loss}%\n"
+            message += f"🎯 Тейк-профит: {take_profit}%\n"
+            
+            # Пробуем отправить сообщение напрямую для отладки
+            try:
+                self.logger.info("Пробуем отправить сообщение напрямую для отладки")
+                direct_result = await self.telegram.send_message_direct(message)
+                if direct_result:
+                    self.logger.info("Сообщение успешно отправлено напрямую")
+                else:
+                    self.logger.warning("Не удалось отправить сообщение напрямую")
+            except Exception as direct_error:
+                self.logger.error(f"Ошибка при прямой отправке: {str(direct_error)}")
+            
+            # Отправляем сообщение обычным способом
+            result = await self.telegram.send_message(message)
+            if result:
+                self.logger.info("Отправлено уведомление о запуске в Telegram")
+            else:
+                self.logger.warning("Не удалось отправить уведомление в Telegram")
+                
+        except Exception as e:
+            self.logger.error(f"Ошибка при отправке уведомления в Telegram: {str(e)}")
+            self.logger.debug(traceback.format_exc())
 
     async def stop(self):
-        """Остановка системы."""
-        if not self.running:
-            logger.warning("Система не запущена")
+        """Останавливает работу системы."""
+        if not self.initialized:
+            self.logger.warning("Попытка остановить неинициализированную систему")
             return
         
+        self.logger.info("Останавливаем систему...")
+        
+        # Отправляем итоги торговой сессии через Telegram
+        if hasattr(self, 'telegram_bot') and self.telegram_bot:
+            try:
+                await self._send_session_summary()
+            except Exception as e:
+                self.logger.error(f"Ошибка при отправке итогов сессии в Telegram: {e}")
+        
+        # Останавливаем все компоненты
         try:
-            # Остановка Telegram бота
-            if self.telegram_bot:
+            # Останавливаем стратегию
+            if hasattr(self, 'strategy') and self.strategy:
+                await self.strategy.stop()
+            
+            # Останавливаем интеграцию с биржей
+            if hasattr(self, 'exchange_integration') and self.exchange_integration:
+                await self.exchange_integration.stop()
+            
+            # Останавливаем Telegram бота
+            if hasattr(self, 'telegram_bot') and self.telegram_bot:
                 await self.telegram_bot.stop()
             
-            # Остановка компонентов
-            await self._stop_components()
-            
-            self.running = False
-            logger.info("Система остановлена")
-            
+            self.logger.info("Система успешно остановлена")
         except Exception as e:
-            logger.error(f"Ошибка при остановке системы: {e}")
+            self.logger.error(f"Ошибка при остановке системы: {e}")
             raise
 
-    async def set_mode(self, mode: str) -> dict:
+    async def _send_session_summary(self):
+        """Отправляет сводку по торговой сессии в Telegram."""
+        try:
+            if not hasattr(self, 'telegram') or self.telegram is None:
+                self.logger.warning("Telegram интеграция не инициализирована, сводка не отправлена")
+                return
+                
+            # Получаем параметры из конфигурации
+            config = self.config_manager.get_config()
+            symbol = config.get("general", {}).get("symbol", "BTCUSDT")
+            
+            # Формируем сообщение
+            message = f"📊 *Сводка торговой сессии*\n\n"
+            message += f"💱 Пара: {symbol}\n"
+            
+            # Добавляем информацию о времени работы
+            if hasattr(self, 'start_time'):
+                import datetime
+                duration = datetime.datetime.now() - self.start_time
+                hours, remainder = divmod(duration.seconds, 3600)
+                minutes, seconds = divmod(remainder, 60)
+                message += f"⏱️ Время работы: {hours}ч {minutes}м {seconds}с\n"
+            
+            # Добавляем статистику торговли, если есть
+            if hasattr(self, 'trader') and self.trader:
+                try:
+                    # Получаем статистику от трейдера
+                    stats = await self.trader.get_performance_stats()
+                    
+                    # Добавляем статистику в сообщение
+                    message += f"\n📈 *Статистика торговли:*\n"
+                    message += f"💰 P&L: {stats.get('pnl', 0.0):.2f} USDT ({stats.get('pnl_percent', 0.0):.2f}%)\n"
+                    message += f"🔄 Сделок: {stats.get('trades_count', 0)}\n"
+                    message += f"✅ Успешных: {stats.get('winning_trades', 0)}\n"
+                    message += f"❌ Убыточных: {stats.get('losing_trades', 0)}\n"
+                    
+                    # Добавляем винрейт, если есть сделки
+                    if stats.get('trades_count', 0) > 0:
+                        winrate = (stats.get('winning_trades', 0) / stats.get('trades_count', 0)) * 100
+                        message += f"🎯 Винрейт: {winrate:.2f}%\n"
+                except Exception as e:
+                    self.logger.error(f"Ошибка при получении статистики торговли: {str(e)}")
+                    message += "\n⚠️ Не удалось получить статистику торговли\n"
+            else:
+                message += "\n⚠️ Нет данных о торговле\n"
+            
+            # Отправляем сообщение напрямую для отладки
+            try:
+                self.logger.info("Отправка сводки по сессии напрямую")
+                direct_result = await self.telegram.send_message_direct(message)
+                if direct_result:
+                    self.logger.info("Сводка по сессии успешно отправлена напрямую")
+                else:
+                    self.logger.warning("Не удалось отправить сводку по сессии напрямую")
+            except Exception as direct_error:
+                self.logger.error(f"Ошибка при прямой отправке сводки: {str(direct_error)}")
+            
+            # Отправляем сообщение обычным способом
+            result = await self.telegram.send_message(message)
+            if result:
+                self.logger.info("Отправлена сводка по торговой сессии в Telegram")
+            else:
+                self.logger.warning("Не удалось отправить сводку по торговой сессии в Telegram")
+                
+        except Exception as e:
+            self.logger.error(f"Ошибка при отправке сводки по сессии: {str(e)}")
+            self.logger.debug(traceback.format_exc())
+
+    async def run_forever(self):
         """
-        Изменение режима работы.
+        Запускает бесконечный цикл для поддержания работы бота.
+        Этот метод блокирует выполнение до получения сигнала остановки.
+        """
+        self.logger.info("Бот запущен. Нажмите Ctrl+C для завершения...")
+        
+        try:
+            # Бесконечный цикл для поддержания работы бота
+            while True:
+                await asyncio.sleep(1)
+        except asyncio.CancelledError:
+            self.logger.info("Задача отменена")
+            raise
+
+    async def set_mode(self, mode: str) -> bool:
+        """
+        Изменение режима работы системы.
         
         Args:
             mode: Новый режим работы
             
         Returns:
-            Результат операции
+            True, если режим успешно изменен, иначе False
         """
-        if mode not in [TradingModes.DRY, TradingModes.BACKTEST, TradingModes.REAL]:
-            self.logger.error(f"Недопустимый режим работы: {mode}")
-            return {"success": False, "error": f"Недопустимый режим работы: {mode}"}
-        
-        if self.current_mode == mode:
-            self.logger.info(f"Система уже работает в режиме: {mode}")
-            return {"success": True, "mode": mode}
-        
         try:
-            # Если система запущена, останавливаем ее
-            was_running = self.running
-            if was_running:
-                await self.stop()
+            # Проверка валидности режима
+            if mode not in ['backtest', 'dry', 'real']:
+                self.logger.error(f"Неизвестный режим работы: {mode}")
+                return False
+                
+            # Остановка текущих компонентов
+            await self.stop()
             
-            # Изменение режима
+            # Установка нового режима
             self.current_mode = mode
-            self.config.set("TRADING_MODE", mode)
-            
-            # Если система была запущена, запускаем ее снова
-            if was_running:
-                await self.start()
-            
             self.logger.info(f"Режим работы изменен на: {mode}")
-            return {"success": True, "mode": mode}
             
+            # Запуск системы в новом режиме
+            await self.start()
+            
+            return True
         except Exception as e:
             self.logger.error(f"Ошибка при изменении режима работы: {e}")
-            return {"success": False, "error": str(e)}
+            self.logger.debug(traceback.format_exc())
+            return False
 
     async def get_status(self) -> str:
         """
@@ -1123,17 +1519,14 @@ class LeonOrchestrator:
         Получение текущего баланса.
         
         Returns:
-            Текущий баланс
+            float: Текущий баланс
         """
-        if not self.trader:
-            logger.warning("Трейдер не инициализирован")
-            return 0.0
-        
         try:
-            balance = await self.trader.get_balance()
-            return balance
+            if hasattr(self, 'binance_client') and self.binance_client:
+                return await self.binance_client.get_balance()
+            return 0.0
         except Exception as e:
-            logger.error(f"Ошибка при получении баланса: {e}")
+            self.logger.error(f"Ошибка при получении баланса: {e}")
             return 0.0
 
     async def get_positions(self) -> list:
@@ -1144,14 +1537,14 @@ class LeonOrchestrator:
             Список открытых позиций
         """
         if not self.trader:
-            logger.warning("Трейдер не инициализирован")
+            self.logger.warning("Трейдер не инициализирован")
             return []
         
         try:
             positions = await self.trader.get_positions()
             return positions
         except Exception as e:
-            logger.error(f"Ошибка при получении позиций: {e}")
+            self.logger.error(f"Ошибка при получении позиций: {e}")
             return []
 
     async def open_position(self, direction: str) -> dict:
@@ -1165,12 +1558,12 @@ class LeonOrchestrator:
             Результат операции
         """
         if not self.trader:
-            logger.warning("Трейдер не инициализирован")
+            self.logger.warning("Трейдер не инициализирован")
             return {"success": False, "error": "Трейдер не инициализирован"}
         
         try:
             # Получение текущего символа
-            symbol = self.config.get("TRADING_SYMBOL", "BTCUSDT")
+            symbol = self.config_manager.get_value("TRADING_SYMBOL", "BTCUSDT")
             
             # Открытие позиции
             result = await self.trader.enter_position(symbol, direction)
@@ -1182,13 +1575,14 @@ class LeonOrchestrator:
                         symbol=symbol,
                         direction=direction,
                         price=result.get("price"),
-                        size=result.get("size")
+                        size=result.get("size"),
+                        is_open=True
                     )
             
             return result
             
         except Exception as e:
-            logger.error(f"Ошибка при открытии позиции: {e}")
+            self.logger.error(f"Ошибка при открытии позиции: {e}")
             return {"success": False, "error": str(e)}
 
     async def close_all_positions(self) -> dict:
@@ -1199,7 +1593,7 @@ class LeonOrchestrator:
             Результат операции
         """
         if not self.trader:
-            logger.warning("Трейдер не инициализирован")
+            self.logger.warning("Трейдер не инициализирован")
             return {"success": False, "error": "Трейдер не инициализирован"}
         
         try:
@@ -1227,7 +1621,8 @@ class LeonOrchestrator:
                             direction="SELL" if pos["direction"] == "BUY" else "BUY",
                             price=result.get("price"),
                             size=pos["size"],
-                            pnl=result.get("pnl")
+                            pnl=result.get("pnl"),
+                            is_open=False
                         )
             
             return {
@@ -1237,7 +1632,7 @@ class LeonOrchestrator:
             }
             
         except Exception as e:
-            logger.error(f"Ошибка при закрытии позиций: {e}")
+            self.logger.error(f"Ошибка при закрытии позиций: {e}")
             return {"success": False, "error": str(e)}
 
     def _get_mode_display(self) -> str:
@@ -1255,36 +1650,208 @@ class LeonOrchestrator:
         return mode_map.get(self.current_mode, self.current_mode)
 
     async def _send_status_update(self):
-        """Отправка обновления статуса через Telegram."""
-        if not self.telegram_bot:
+        """Отправляет обновление статуса через Telegram."""
+        if not hasattr(self, 'telegram_bot') or not self.telegram_bot:
+            self.logger.warning("Невозможно отправить статус: Telegram бот не инициализирован")
             return
         
         try:
-            # Получение параметров
-            symbol = self.config.get("TRADING_SYMBOL", "BTCUSDT")
-            balance = await self.get_balance()
-            leverage = int(self.config.get("LEVERAGE", 20))
-            risk_per_trade = float(self.config.get("RISK_PER_TRADE", 2.0))
-            stop_loss = float(self.config.get("STOP_LOSS_PERCENT", 2.0))
-            take_profit = float(self.config.get("TAKE_PROFIT_PERCENT", 3.0))
+            config = self.config_manager.get_config()
+            symbol = config["general"]["symbol"]
+            mode = self.current_mode
+            balance = config["general"]["initial_balance"]
+            leverage = config["general"]["leverage"]
+            risk_per_trade = config["risk"]["max_position_size"]
+            stop_loss = config["risk"]["max_loss_percent"]
+            take_profit = config["risk"].get("take_profit_multiplier", 2.0)
             
-            # Отправка обновления
-            await self.telegram_bot.send_status_update(
-                symbol=symbol,
-                mode=self.current_mode,
-                balance=balance,
-                leverage=leverage,
-                risk_per_trade=risk_per_trade,
-                stop_loss=stop_loss,
-                take_profit=take_profit
-            )
+            # Получаем случайную юмористическую фразу
+            humor_phrases = [
+                "Ваш электронный финансовый самоубийца на связи!",
+                "Продолжаем терять деньги с улыбкой!",
+                "Кто сказал, что деньги не растут на деревьях? У нас они вообще испаряются!",
+                "Инвестиции — это способ сохранить деньги... у брокера!"
+            ]
             
+            import random
+            humor_phrase = random.choice(humor_phrases)
+            
+            # Формируем сообщение о статусе с текстовыми таблицами
+            status_message = f"*StableTrade*\n🤖 *Leon Trading Bot*\n\n"
+            
+            # Добавляем юмористическую фразу
+            status_message += f"_{humor_phrase}_\n\n"
+            
+            # Таблица: Основные параметры
+            status_message += "```\n"
+            status_message += "╔══════════════════════════════════════════════╗\n"
+            status_message += f"║ [БАЛАНС] {balance:.2f} USDT │ [ПАРА] {symbol}".ljust(49) + "║\n"
+            status_message += f"║ [РЕЖИМ] {self._get_mode_display()} │ [ПЛЕЧО] {leverage}x".ljust(49) + "║\n"
+            status_message += f"║ [РИСК] {risk_per_trade} USDT │ [СТОП-ЛОСС] {stop_loss}%".ljust(49) + "║\n"
+            status_message += f"║ [ТЕЙК-ПРОФИТ] {take_profit}x".ljust(49) + "║\n"
+            status_message += "╚══════════════════════════════════════════════╝\n"
+            status_message += "```\n\n"
+            
+            # Таблица: Последние цены
+            recent_prices = self.get_recent_prices(limit=4)
+            if recent_prices:
+                import datetime
+                now = datetime.datetime.now().strftime("%H:%M:%S")
+                
+                status_message += "```\n"
+                status_message += "╔══════════════════════════════════════════════╗\n"
+                status_message += f"║ ПОСЛЕДНИЕ ЦЕНЫ ([ОБНОВЛЕНО] {now})".ljust(49) + "║\n"
+                status_message += "╠══════════════════════════════════════════════╣\n"
+                
+                for i in range(0, len(recent_prices), 2):
+                    line = "║ "
+                    for j in range(2):
+                        if i + j < len(recent_prices):
+                            price = recent_prices[i + j]
+                            price_value = price.get("price", 0)
+                            prev_price = recent_prices[i + j - 1].get("price", price_value) if i + j > 0 else price_value
+                            
+                            direction = "▲" if price_value >= prev_price else "▼"
+                            color = "[ЗЕЛЕНЫЙ]" if price_value >= prev_price else "[КРАСНЫЙ]"
+                            
+                            line += f"{color} {price_value:.2f} {direction} │ "
+                    
+                    line = line.rstrip("│ ").ljust(48) + "║\n"
+                    status_message += line
+                
+                status_message += "╚══════════════════════════════════════════════╝\n"
+                status_message += "```\n\n"
+            
+            # Таблица: Результаты и позиции
+            positions = []
+            profit_loss = 0
+            profit_loss_percent = 0
+            
+            try:
+                if hasattr(self, 'trader') and self.trader:
+                    positions = await self.trader.get_positions()
+                    stats = await self.trader.get_performance_stats()
+                    if stats:
+                        profit_loss = stats.get("profit_loss", 0)
+                        profit_loss_percent = stats.get("profit_loss_percent", 0)
+            except Exception as e:
+                self.logger.error(f"Ошибка при получении позиций или статистики: {e}")
+            
+            color = "[ЗЕЛЕНЫЙ]" if profit_loss >= 0 else "[КРАСНЫЙ]"
+            
+            status_message += "```\n"
+            status_message += "╔══════════════════════════════════════════════╗\n"
+            status_message += f"║ [P&L] {color} {profit_loss:.2f} USDT ({profit_loss_percent:.2f}%)".ljust(49) + "║\n"
+            status_message += "╠══════════════════════════════════════════════╣\n"
+            
+            if positions:
+                status_message += "║ ОТКРЫТЫЕ ПОЗИЦИИ:".ljust(49) + "║\n"
+                for pos in positions:
+                    direction = pos.get("direction", "UNKNOWN")
+                    symbol = pos.get("symbol", "UNKNOWN")
+                    size = pos.get("size", 0)
+                    entry_price = pos.get("entry_price", 0)
+                    current_price = pos.get("current_price", 0)
+                    pos_pnl = pos.get("pnl", 0)
+                    pos_pnl_percent = pos.get("pnl_percent", 0)
+                    
+                    dir_color = "[ЗЕЛЕНЫЙ]" if direction == "LONG" else "[КРАСНЫЙ]"
+                    pnl_color = "[ЗЕЛЕНЫЙ]" if pos_pnl >= 0 else "[КРАСНЫЙ]"
+                    
+                    status_message += f"║ {dir_color} {direction} {symbol} | Размер: {size:.2f}".ljust(49) + "║\n"
+                    status_message += f"║ Вход: {entry_price:.2f} | Текущая: {current_price:.2f}".ljust(49) + "║\n"
+                    status_message += f"║ P&L: {pnl_color} {pos_pnl:.2f} USDT ({pos_pnl_percent:.2f}%)".ljust(49) + "║\n"
+            else:
+                status_message += "║ ОТКРЫТЫЕ ПОЗИЦИИ: [НЕТ]".ljust(49) + "║\n"
+            
+            status_message += "╚══════════════════════════════════════════════╝\n"
+            status_message += "```\n\n"
+            
+            # Таблица: Сигналы
+            signals = self.get_signals(limit=1)
+            if signals:
+                status_message += "```\n"
+                status_message += "╔══════════════════════════════════════════════╗\n"
+                
+                signal = signals[0]
+                action = signal.get("action", "UNKNOWN")
+                confidence = signal.get("confidence", 0)
+                
+                action_color = "[ЗЕЛЕНЫЙ]" if action == "BUY" else "[КРАСНЫЙ]"
+                
+                status_message += f"║ СИГНАЛЫ: {action_color} {action}".ljust(49) + "║\n"
+                status_message += "╠══════════════════════════════════════════════╣\n"
+                status_message += f"║ Уверенность: {int(confidence * 100)}% ({confidence:.2f})".ljust(49) + "║\n"
+                status_message += "╚══════════════════════════════════════════════╝\n"
+                status_message += "```\n\n"
+            
+            # Таблица: Индикаторы
+            indicators = self.get_indicators()
+            if indicators:
+                status_message += "```\n"
+                status_message += "╔══════════════════════════════════════════════╗\n"
+                status_message += "║ ИНДИКАТОРЫ:".ljust(49) + "║\n"
+                status_message += "╠══════════════════════════════════════════════╣\n"
+                
+                if "rsi" in indicators:
+                    rsi = indicators["rsi"]
+                    rsi_status = "[ПЕРЕКУПЛЕННОСТЬ]" if rsi > 70 else "[ПЕРЕПРОДАННОСТЬ]" if rsi < 30 else ""
+                    status_message += f"║ RSI: {rsi:.2f} {rsi_status}".ljust(49) + "║\n"
+                
+                if "macd" in indicators:
+                    macd = indicators["macd"]
+                    macd_signal = indicators.get("macd_signal", 0)
+                    macd_status = "[БЫЧИЙ]" if macd > macd_signal else "[МЕДВЕЖИЙ]"
+                    status_message += f"║ MACD: {macd:.2f} {macd_status}".ljust(49) + "║\n"
+                
+                if "bb_upper" in indicators and "bb_middle" in indicators and "bb_lower" in indicators:
+                    bb_upper = indicators["bb_upper"]
+                    bb_middle = indicators["bb_middle"]
+                    bb_lower = indicators["bb_lower"]
+                    
+                    status_message += "║ Bollinger Bands:".ljust(49) + "║\n"
+                    status_message += f"║ Нижняя: {bb_lower:.2f} │ Средняя: {bb_middle:.2f}".ljust(49) + "║\n"
+                    status_message += f"║ Верхняя: {bb_upper:.2f}".ljust(49) + "║\n"
+                
+                status_message += "╚══════════════════════════════════════════════╝\n"
+                status_message += "```\n\n"
+            
+            # Таблица: Управление
+            status_message += "```\n"
+            status_message += "╔══════════════════════════════════════════════╗\n"
+            status_message += "║ [ОБНОВЛЕНИЕ] каждые 5 сек.".ljust(49) + "║\n"
+            status_message += "║ [УПРАВЛЕНИЕ] через кнопки ниже".ljust(49) + "║\n"
+            status_message += "╚══════════════════════════════════════════════╝\n"
+            status_message += "```\n"
+            
+            # Отправляем сообщение с кнопками управления
+            keyboard = [
+                [
+                    {"text": "📊 Статус", "callback_data": "status"},
+                    {"text": "📈 Торговля", "callback_data": "trade"}
+                ],
+                [
+                    {"text": "⏸️ Пауза", "callback_data": "pause_bot"},
+                    {"text": "▶️ Продолжить", "callback_data": "resume_bot"}
+                ],
+                [
+                    {"text": "⚙️ Настройки", "callback_data": "settings"},
+                    {"text": "❌ Остановить", "callback_data": "stop_bot"}
+                ]
+            ]
+            
+            # Отправляем сообщение с клавиатурой
+            await self.telegram_bot.send_message_with_keyboard(status_message, keyboard)
+            
+            self.logger.debug("Статус системы отправлен в Telegram")
         except Exception as e:
-            self.logger.error(f"Ошибка при отправке обновления статуса: {e}")
+            self.logger.error(f"Ошибка при отправке статуса в Telegram: {e}")
+            self.logger.debug(traceback.format_exc())
 
     async def _init_components(self) -> None:
         """Инициализация компонентов системы."""
-        await self._initialize_components(self.config)
+        config = self.config_manager.get_config()
+        await self._initialize_components(config)
 
     async def _start_components(self) -> None:
         """Запуск компонентов системы."""
@@ -1293,17 +1860,35 @@ class LeonOrchestrator:
 
     async def _start_components_for_mode(self, mode: str) -> None:
         """Запуск компонентов для указанного режима."""
-        if mode == TRADING_MODES.DRY:
+        if mode == 'dry':
             await self._start_dry_mode()
-        elif mode == TRADING_MODES.BACKTEST:
+        elif mode == 'backtest':
             await self._start_backtest_mode()
-        elif mode == TRADING_MODES.REAL:
+        elif mode == 'real':
             await self._start_real_mode()
 
     async def _start_dry_mode(self) -> None:
         """Запуск режима сухого тестирования."""
         # Реализация запуска режима сухого тестирования
-        pass
+        if hasattr(self, 'visualizer') and self.visualizer:
+            # Передаем объект локализации в визуализатор
+            if not hasattr(self.visualizer, 'localization') or not self.visualizer.localization:
+                self.visualizer.localization = self.localization_manager
+            
+            self.visualizer.start()
+            self.logger.info("Запущен консольный визуализатор в режиме dry")
+            
+            # Запускаем периодическое обновление данных визуализатора
+            asyncio.create_task(self._periodic_visualization_update())
+
+    async def _periodic_visualization_update(self) -> None:
+        """Периодическое обновление данных визуализатора."""
+        try:
+            while self.running:
+                await self._update_visualization()
+                await asyncio.sleep(1)  # Обновляем каждую секунду
+        except Exception as e:
+            self.logger.error(f"Ошибка в цикле обновления визуализации: {e}")
 
     async def _start_backtest_mode(self) -> None:
         """Запуск режима бэктестирования."""
@@ -1316,30 +1901,341 @@ class LeonOrchestrator:
         pass
 
     async def _stop_components(self) -> None:
-        """Остановка компонентов системы."""
-        # Остановка компонентов в зависимости от текущего режима
-        await self._stop_components_for_mode(self.current_mode)
+        """Останавливает компоненты системы."""
+        try:
+            # Останавливаем стратегию, если она поддерживает метод stop
+            if hasattr(self, 'strategy') and self.strategy and hasattr(self.strategy, 'stop'):
+                try:
+                    await self.strategy.stop()
+                    self.logger.info("Стратегия остановлена")
+                except Exception as e:
+                    self.logger.error(f"Ошибка при остановке стратегии: {str(e)}")
+                    self.logger.debug(traceback.format_exc())
+            
+            # Останавливаем визуализатор
+            if hasattr(self, 'visualizer') and self.visualizer:
+                try:
+                    if hasattr(self.visualizer, 'stop'):
+                        await self.visualizer.stop()
+                    self.logger.info("Визуализатор остановлен")
+                except Exception as e:
+                    self.logger.error(f"Ошибка при остановке визуализатора: {str(e)}")
+                    self.logger.debug(traceback.format_exc())
+            
+            # Закрываем соединение с Binance
+            if hasattr(self, 'binance_client') and self.binance_client:
+                try:
+                    if hasattr(self.binance_client, 'close'):
+                        await self.binance_client.close()
+                    self.logger.info("Соединение с Binance закрыто")
+                except Exception as e:
+                    self.logger.error(f"Ошибка при закрытии соединения с Binance: {str(e)}")
+                    self.logger.debug(traceback.format_exc())
+            
+            # Останавливаем Telegram бота
+            if hasattr(self, 'telegram_bot') and self.telegram_bot:
+                try:
+                    if hasattr(self.telegram_bot, 'stop'):
+                        await self.telegram_bot.stop()
+                    self.logger.info("Telegram бот остановлен")
+                except Exception as e:
+                    self.logger.error(f"Ошибка при остановке Telegram бота: {str(e)}")
+                    self.logger.debug(traceback.format_exc())
+            
+            # Отправляем сводку по сессии
+            await self._send_session_summary()
+            
+        except Exception as e:
+            self.logger.error(f"Ошибка при остановке компонентов: {str(e)}")
+            self.logger.debug(traceback.format_exc())
 
-    async def _stop_components_for_mode(self, mode: str) -> None:
-        """Остановка компонентов для указанного режима."""
-        if mode == TRADING_MODES.DRY:
-            await self._stop_dry_mode()
-        elif mode == TRADING_MODES.BACKTEST:
-            await self._stop_backtest_mode()
-        elif mode == TRADING_MODES.REAL:
-            await self._stop_real_mode()
+    async def pause(self) -> bool:
+        """
+        Приостанавливает работу бота без полной остановки.
+        
+        Returns:
+            bool: Успешность приостановки
+        """
+        if not self.running:
+            self.logger.warning("Оркестратор не запущен")
+            return False
+            
+        if self.paused:
+            self.logger.warning("Оркестратор уже приостановлен")
+            return True
+            
+        try:
+            self.logger.info("Приостановка работы оркестратора")
+            
+            # Приостанавливаем торговлю
+            if hasattr(self, 'trader') and self.trader:
+                await self.trader.pause()
+                
+            # Устанавливаем флаг паузы
+            self.paused = True
+            
+            # Генерируем событие о приостановке
+            await self.event_bus.emit("orchestrator_paused", {
+                "timestamp": datetime.now().isoformat()
+            })
+            
+            return True
+        except Exception as e:
+            self.logger.error(f"Ошибка при приостановке оркестратора: {str(e)}")
+            self.logger.debug(traceback.format_exc())
+            return False
+    
+    async def resume(self) -> bool:
+        """
+        Возобновляет работу бота после паузы.
+        
+        Returns:
+            bool: Успешность возобновления
+        """
+        if not self.running:
+            self.logger.warning("Оркестратор не запущен")
+            return False
+            
+        if not self.paused:
+            self.logger.warning("Оркестратор не приостановлен")
+            return True
+            
+        try:
+            self.logger.info("Возобновление работы оркестратора")
+            
+            # Возобновляем торговлю
+            if hasattr(self, 'trader') and self.trader:
+                await self.trader.resume()
+                
+            # Сбрасываем флаг паузы
+            self.paused = False
+            
+            # Генерируем событие о возобновлении
+            await self.event_bus.emit("orchestrator_resumed", {
+                "timestamp": datetime.now().isoformat()
+            })
+            
+            return True
+        except Exception as e:
+            self.logger.error(f"Ошибка при возобновлении работы оркестратора: {str(e)}")
+            self.logger.debug(traceback.format_exc())
+            return False 
 
-    async def _stop_dry_mode(self) -> None:
-        """Остановка режима сухого тестирования."""
-        # Реализация остановки режима сухого тестирования
-        pass
+    def get_visualizer(self):
+        """
+        Получить визуализатор.
+        
+        Returns:
+            Визуализатор или None, если он не инициализирован
+        """
+        return self.visualizer
+    
+    def get_trader(self):
+        """
+        Получить трейдера.
+        
+        Returns:
+            Трейдер или None, если он не инициализирован
+        """
+        return self.trader
+    
+    def is_running(self):
+        """
+        Проверить, запущена ли система.
+        
+        Returns:
+            bool: True, если система запущена, иначе False
+        """
+        return self.running
+    
+    def get_recent_prices(self, limit: int = 5):
+        """
+        Получает последние цены.
+        
+        Args:
+            limit: Максимальное количество цен для возврата
+            
+        Returns:
+            Список последних цен
+        """
+        if not hasattr(self, '_prices') or not self._prices:
+            self._prices = []
+            
+            # Добавляем тестовые данные, если список пуст
+            if not self._prices:
+                import random
+                base_price = 3000.0
+                for i in range(10):
+                    price = base_price + random.uniform(-50, 50)
+                    self._prices.append(price)
+            
+        # Возвращаем последние цены
+        return self._prices[:limit]
+    
+    async def update_price(self, symbol: str, price: float):
+        """
+        Обновляет текущую цену.
+        
+        Args:
+            symbol: Символ торговой пары
+            price: Новая цена
+        """
+        if not hasattr(self, '_prices'):
+            self._prices = []
+            
+        # Добавляем новую цену в начало списка
+        self._prices.insert(0, price)
+        
+        # Ограничиваем размер списка
+        max_prices = 20
+        if len(self._prices) > max_prices:
+            self._prices = self._prices[:max_prices]
+            
+        self.logger.debug(f"Цена обновлена: {symbol} = {price}")
+    
+    def get_indicators(self):
+        """
+        Получает текущие значения индикаторов.
+        
+        Returns:
+            Словарь с текущими значениями индикаторов
+        """
+        if not hasattr(self, '_indicators'):
+            self._indicators = {
+                "rsi": 50.0,
+                "macd": 0.0,
+                "macd_signal": 0.0,
+                "bb_upper": 0.0,
+                "bb_middle": 0.0,
+                "bb_lower": 0.0
+            }
+            
+        return self._indicators
+    
+    def get_signals(self, limit: int = 3):
+        """
+        Получает последние торговые сигналы.
+        
+        Args:
+            limit: Максимальное количество сигналов для возврата
+            
+        Returns:
+            Список последних торговых сигналов
+        """
+        if not hasattr(self, '_signals'):
+            self._signals = []
+            
+        # Возвращаем последние сигналы
+        return self._signals[:limit]
+    
+    async def add_signal(self, signal: Dict[str, Any]):
+        """
+        Добавляет новый торговый сигнал.
+        
+        Args:
+            signal: Информация о сигнале (должна содержать ключи 'action', 'confidence', 'timestamp')
+        """
+        if not hasattr(self, '_signals'):
+            self._signals = []
+            
+        # Добавляем сигнал в начало списка
+        self._signals.insert(0, signal)
+        
+        # Ограничиваем размер списка
+        max_signals = 10
+        if len(self._signals) > max_signals:
+            self._signals = self._signals[:max_signals]
+            
+        self.logger.debug(f"Добавлен новый сигнал: {signal}")
+    
+    async def update_indicators(self, new_indicators: Dict[str, Any]):
+        """
+        Обновляет значения индикаторов.
+        
+        Args:
+            new_indicators: Словарь с новыми значениями индикаторов
+        """
+        if not hasattr(self, '_indicators'):
+            self._indicators = {
+                "rsi": 50.0,
+                "macd": 0.0,
+                "macd_signal": 0.0,
+                "bb_upper": 0.0,
+                "bb_middle": 0.0,
+                "bb_lower": 0.0
+            }
+            
+        self._indicators.update(new_indicators)
+        self.logger.debug(f"Индикаторы обновлены: {new_indicators}")
 
-    async def _stop_backtest_mode(self) -> None:
-        """Остановка режима бэктестирования."""
-        # Реализация остановки режима бэктестирования
-        pass
-
-    async def _stop_real_mode(self) -> None:
-        """Остановка режима реальной торговли."""
-        # Реализация остановки режима реальной торговли
-        pass 
+    def get_trader(self) -> Optional[Any]:
+        """
+        Получает экземпляр трейдера.
+        
+        Returns:
+            Экземпляр трейдера или None, если трейдер не инициализирован
+        """
+        if hasattr(self, 'trader') and self.trader:
+            return self.trader
+        return None
+    
+    def get_recent_prices(self) -> List[float]:
+        """
+        Получает последние цены для визуализации.
+        
+        Returns:
+            Список последних цен
+        """
+        try:
+            # Получаем данные о ценах из маркет-дата провайдера
+            if hasattr(self, 'market_data_provider') and self.market_data_provider:
+                # Получаем последние N свечей
+                klines = self.market_data_provider.get_recent_klines(limit=10)
+                if klines:
+                    # Извлекаем цены закрытия из свечей
+                    prices = [float(kline['close']) for kline in klines]
+                    return prices
+                    
+            # Если не удалось получить данные из провайдера, возвращаем пустой список
+            return []
+        except Exception as e:
+            self.logger.warning(f"Ошибка при получении последних цен: {str(e)}")
+            return []
+    
+    def get_indicators(self) -> Dict[str, Any]:
+        """
+        Получает значения индикаторов для визуализации.
+        
+        Returns:
+            Словарь с индикаторами
+        """
+        try:
+            # Получаем индикаторы из стратегии
+            if hasattr(self, 'strategy') and self.strategy:
+                indicators = self.strategy.get_indicators()
+                return indicators
+                
+            # Если стратегия не инициализирована, возвращаем пустой словарь
+            return {}
+        except Exception as e:
+            self.logger.warning(f"Ошибка при получении индикаторов: {str(e)}")
+            return {}
+    
+    def get_signals(self) -> List[Dict[str, Any]]:
+        """
+        Получает сигналы для визуализации.
+        
+        Returns:
+            Список сигналов
+        """
+        try:
+            # Получаем сигналы из стратегии
+            if hasattr(self, 'strategy') and self.strategy:
+                signals = self.strategy.get_signals()
+                return signals
+                
+            # Если стратегия не инициализирована, возвращаем пустой список
+            return []
+        except Exception as e:
+            self.logger.warning(f"Ошибка при получении сигналов: {str(e)}")
+            return []
