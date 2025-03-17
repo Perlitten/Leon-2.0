@@ -12,6 +12,8 @@ import traceback
 from typing import Dict, List, Any, Optional, Union, Callable, Set
 from datetime import datetime
 import random
+import threading
+import yaml
 
 from core.config_manager import ConfigManager
 from core.component_factory import (
@@ -28,6 +30,7 @@ from core.constants import (
 )
 from core.localization import LocalizationManager
 from notification.telegram.bot import TelegramBot
+from visualization.manager import VisualizationManager
 
 
 class EventBus:
@@ -435,22 +438,26 @@ class TradingModeManager:
 
 class MLIntegrationManager:
     """
-    Менеджер интеграции с ML-моделями.
+    Менеджер интеграции с машинным обучением.
     
-    Отвечает за загрузку, управление и использование ML-моделей.
+    Отвечает за загрузку, обучение и использование моделей машинного обучения.
     """
     
     def __init__(self, orchestrator: 'LeonOrchestrator'):
         """
-        Инициализация менеджера интеграции с ML-моделями.
+        Инициализация менеджера интеграции с машинным обучением.
         
         Args:
             orchestrator: Экземпляр оркестратора
         """
         self.orchestrator = orchestrator
+        self.logger = logging.getLogger(self.__class__.__name__)
+        self.config = orchestrator.config if orchestrator else {}
+        
+        # Загруженные модели
         self.models = {}
-        self.current_model = None
-        self.logger = logging.getLogger("MLIntegrationManager")
+        
+        self.logger.info("Менеджер интеграции с машинным обучением инициализирован")
     
     async def load_model(self, model_name: str) -> bool:
         """
@@ -669,169 +676,11 @@ class MLIntegrationManager:
             raise EvaluationError(f"Ошибка при оценке модели '{model_name}': {str(e)}", model_name=model_name) from e
 
 
-class VisualizationManager:
-    """
-    Менеджер визуализации.
-    
-    Отвечает за управление визуализацией данных.
-    """
-    
-    def __init__(self, orchestrator: 'LeonOrchestrator'):
-        """
-        Инициализация менеджера визуализации.
-        
-        Args:
-            orchestrator: Экземпляр оркестратора
-        """
-        self.orchestrator = orchestrator
-        self.visualizer = None
-        self.visualization_task = None
-        self.update_task = None
-        self.logger = logging.getLogger("VisualizationManager")
-    
-    async def start_visualization(self) -> None:
-        """Запускает визуализацию."""
-        config = self.orchestrator.config_manager.get_config()
-        
-        # Проверяем, включена ли визуализация
-        if not config["visualization"]["enabled"]:
-            self.logger.info("Визуализация отключена в конфигурации")
-            return
-        
-        # Создаем визуализатор, если он еще не создан
-        if not self.visualizer:
-            from visualization.console_ui import ConsoleVisualizer
-            self.visualizer = ConsoleVisualizer(
-                name="console",
-                config=config["visualization"],
-                localization=self.orchestrator.localization_manager
-            )
-        
-        # Запускаем визуализатор
-        if hasattr(self.visualizer, 'start'):
-            self.visualizer.start()
-            self.logger.info(f"Запущен консольный визуализатор в режиме {self.orchestrator.mode}")
-        
-        # Запускаем задачу обновления данных
-        self.update_task = asyncio.create_task(self._periodic_visualization_update())
-    
-    async def stop_visualization(self) -> None:
-        """Останавливает визуализацию."""
-        if self.visualizer:
-            self.logger.info("Остановка консольной визуализации")
-            
-            # Останавливаем визуализатор
-            if hasattr(self.visualizer, 'stop'):
-                self.visualizer.stop()
-            
-            # Отменяем задачу обновления, если она запущена
-            if self.update_task and not self.update_task.done():
-                self.update_task.cancel()
-                try:
-                    await self.update_task
-                except asyncio.CancelledError:
-                    pass
-    
-    async def _periodic_visualization_update(self) -> None:
-        """Периодическое обновление данных визуализатора."""
-        try:
-            while self.orchestrator.running:
-                await self._update_visualization()
-                await asyncio.sleep(1)  # Обновляем каждую секунду
-        except asyncio.CancelledError:
-            self.logger.info("Задача обновления визуализации отменена")
-        except Exception as e:
-            self.logger.error(f"Ошибка в цикле обновления визуализации: {str(e)}")
-            self.logger.debug(traceback.format_exc())
-
-    async def _update_visualization(self) -> None:
-        """Обновляет данные визуализации."""
-        if not self.visualizer:
-            return
-            
-        # Гарантируем наличие базовых данных для визуализации
-        self._ensure_visualization_data()
-        
-        try:
-            # Обновляем режим работы
-            if hasattr(self.visualizer, 'update_mode'):
-                self.visualizer.update_mode(self.mode)
-            else:
-                self.logger.warning("Метод update_mode не найден в визуализаторе")
-                
-            # Обновляем торговую пару
-            if hasattr(self.visualizer, 'update_trading_pair'):
-                symbol = self.config.get("trading", {}).get("symbol", "BTCUSDT")
-                interval = self.config.get("trading", {}).get("interval", "1h")
-                self.visualizer.update_trading_pair(symbol, interval)
-            else:
-                self.logger.warning("Метод update_trading_pair не найден в визуализаторе")
-                
-            # Обновляем баланс
-            if hasattr(self.visualizer, 'update_balance'):
-                if self.trader and hasattr(self.trader, 'get_balance'):
-                    balance = self.trader.get_balance()
-                    self.visualizer.update_balance(balance)
-            else:
-                self.logger.warning("Метод update_balance не найден в визуализаторе")
-                
-            # Обновляем цены
-            if hasattr(self.visualizer, 'update_price'):
-                if self._prices and len(self._prices) > 0:
-                    self.visualizer.update_price(self._prices[-1])
-            else:
-                self.logger.warning("Метод update_price не найден в визуализаторе")
-                
-            # Обновляем индикаторы
-            if hasattr(self.visualizer, 'update_indicators'):
-                self.visualizer.update_indicators(self._indicators)
-            else:
-                self.logger.warning("Метод update_indicators не найден в визуализаторе")
-                
-            # Обновляем сигналы
-            if hasattr(self.visualizer, 'update_signals'):
-                self.visualizer.update_signals(self._signals)
-            else:
-                self.logger.warning("Метод update_signals не найден в визуализаторе")
-                
-            # Обновляем позиции
-            if hasattr(self.visualizer, 'update_positions'):
-                if self.trader and hasattr(self.trader, 'get_positions'):
-                    positions = self.trader.get_positions()
-                    self.visualizer.update_positions(positions)
-            else:
-                self.logger.warning("Метод update_positions не найден в визуализаторе")
-                
-        except Exception as e:
-            self.logger.error(f"Ошибка при обновлении визуализации: {str(e)}")
-
-    def _ensure_visualization_data(self):
-        """Гарантирует наличие базовых данных для визуализации."""
-        if not hasattr(self, '_prices') or self._prices is None:
-            self._prices = []
-            # Добавляем тестовые данные для начального отображения
-            import random
-            base_price = 50000.0
-            for i in range(10):
-                self._prices.append(base_price + random.uniform(-100, 100))
-        
-        if not hasattr(self, '_indicators') or self._indicators is None:
-            self._indicators = {
-                "rsi": 50.0,
-                "macd": 0.0,
-                "macd_signal": 0.0
-            }
-        
-        if not hasattr(self, '_signals') or self._signals is None:
-            self._signals = []
-
-
 class LeonOrchestrator:
     """
-    Центральный компонент для управления и координации всех подсистем Leon Trading Bot.
+    Основной оркестратор Leon Trading Bot.
     
-    Отвечает за инициализацию компонентов, управление жизненным циклом системы,
-    переключение между режимами работы и обработку событий.
+    Отвечает за координацию всех компонентов системы.
     """
     
     def __init__(self, config_path: str = "config.yaml"):
@@ -841,35 +690,40 @@ class LeonOrchestrator:
         Args:
             config_path: Путь к файлу конфигурации
         """
-        self.logger = logging.getLogger("LeonOrchestrator")
+        self.logger = logging.getLogger(self.__class__.__name__)
         self.config_path = config_path
-        self.config_manager = ConfigManager(config_path)
-        self.config = self.config_manager.get_config()
+        self.config = {}
+        
+        # Загрузка конфигурации
+        try:
+            with open(config_path, 'r', encoding='utf-8') as f:
+                self.config = yaml.safe_load(f)
+        except Exception as e:
+            self.logger.error(f"Ошибка при загрузке конфигурации: {str(e)}")
+            self.config = {}
+        
+        # Статус системы
+        self.status = SYSTEM_STATUSES["INITIALIZING"]
+        self.running = False
         
         # Инициализация коллекций данных для визуализации
         self._prices = []
         self._indicators = {}
         self._signals = []
         
+        # Добавляем блокировку для потокобезопасного доступа к данным
+        self._data_lock = threading.Lock()
+        
         # Инициализация компонентов
         self.localization_manager = LocalizationManager()
-        self.exchange_factory = ExchangeFactory(self.config)
-        self.notification_factory = NotificationFactory(self.config)
-        self.trading_factory = TradingFactory(self.config)
-        self.visualization_factory = VisualizationFactory(self.config)
-        self.ml_factory = MLFactory(self.config)
+        self.event_bus = EventBus()
+        self.command_processor = CommandProcessor(self)
+        self.trading_mode_manager = TradingModeManager(self)
+        self.ml_integration_manager = MLIntegrationManager(self)
+        self.visualization_manager = VisualizationManager(self)
         
-        # Режим работы
-        self.mode = self.config.get("general", {}).get("mode", "dry")
-        self.current_mode = self.config.get("general", {}).get("mode", "dry")
-        
-        # Статус системы
-        self.status = SYSTEM_STATUSES["INITIALIZING"]
-        
-        self.logger.info(f"Оркестратор инициализирован в режиме {self.mode}")
-        
-        # Инициализация Telegram бота
-        self._init_telegram_bot()
+        # Регистрация базовых команд
+        self._register_base_commands()
     
     def _register_base_commands(self) -> None:
         """Регистрирует базовые команды."""
@@ -973,45 +827,75 @@ class LeonOrchestrator:
             raise OperationError(f"Ошибка при запуске оркестратора: {str(e)}", operation="start") from e
     
     async def stop(self):
-        """Остановка системы."""
-        if not self.running:
+        """Останавливает работу системы."""
+        if not self.initialized:
             self.logger.warning("Попытка остановить неинициализированную систему")
             return
         
+        self.logger.info("Останавливаем систему...")
+        
+        # Отправляем итоги торговой сессии через Telegram
+        if hasattr(self, 'telegram_bot') and self.telegram_bot:
+            try:
+                await self._send_session_summary()
+            except Exception as e:
+                self.logger.error(f"Ошибка при отправке итогов сессии в Telegram: {e}")
+        
+        # Останавливаем визуализацию
+        if hasattr(self, 'visualization_manager'):
+            try:
+                await self.visualization_manager.stop_visualization()
+            except Exception as e:
+                self.logger.error(f"Ошибка при остановке визуализации: {e}")
+        
+        # Останавливаем все компоненты
         try:
-            # Останавливаем компоненты
-            await self._stop_components()
+            # Останавливаем стратегию, если она поддерживает метод stop
+            if hasattr(self, 'strategy') and self.strategy and hasattr(self.strategy, 'stop'):
+                try:
+                    await self.strategy.stop()
+                    self.logger.info("Стратегия остановлена")
+                except Exception as e:
+                    self.logger.error(f"Ошибка при остановке стратегии: {str(e)}")
+                    self.logger.debug(traceback.format_exc())
             
-            # Отправляем уведомление о завершении работы
-            await self._send_telegram_stop_notification()
+            # Останавливаем интеграцию с биржей
+            if hasattr(self, 'exchange_integration') and self.exchange_integration:
+                await self.exchange_integration.stop()
+            
+            # Закрываем соединение с Binance
+            if hasattr(self, 'binance_client') and self.binance_client:
+                try:
+                    if hasattr(self.binance_client, 'close'):
+                        await self.binance_client.close()
+                    self.logger.info("Соединение с Binance закрыто")
+                except Exception as e:
+                    self.logger.error(f"Ошибка при закрытии соединения с Binance: {str(e)}")
+                    self.logger.debug(traceback.format_exc())
+            
+            # Останавливаем Telegram бота
+            if hasattr(self, 'telegram_bot') and self.telegram_bot:
+                await self.telegram_bot.stop()
             
             # Сбрасываем флаг работы
             self.running = False
             
-            self.logger.info("Система остановлена")
+            self.logger.info("Система успешно остановлена")
         except Exception as e:
-            self.logger.error(f"Ошибка при остановке системы: {str(e)}")
-            self.logger.debug(traceback.format_exc())
-            
-            # Даже при ошибке пытаемся отправить уведомление
-            try:
-                await self._send_telegram_stop_notification()
-            except Exception as notify_error:
-                self.logger.error(f"Не удалось отправить уведомление об остановке: {str(notify_error)}")
-            
-            # Сбрасываем флаг работы даже при ошибке
-            self.running = False
+            self.logger.error(f"Ошибка при остановке системы: {e}")
+            raise
     
     async def _send_telegram_stop_notification(self):
         """Отправляет уведомление об остановке системы в Telegram."""
         try:
-            if not hasattr(self, 'telegram') or self.telegram is None:
-                self.logger.warning("Telegram интеграция не инициализирована, уведомление не отправлено")
+            if not hasattr(self, 'telegram_bot') or self.telegram_bot is None:
+                self.logger.warning("Telegram бот не инициализирован, уведомление не отправлено")
                 return
                 
             # Формируем сообщение
             message = f"🛑 *Торговый бот остановлен*\n\n"
-            message += f"Режим: {self.mode.upper()}\n"
+            current_mode = self.trading_mode_manager.get_current_mode()
+            message += f"Режим: {current_mode.upper() if current_mode else 'Не установлен'}\n"
             
             # Добавляем информацию о времени работы
             if hasattr(self, 'start_time'):
@@ -1157,10 +1041,6 @@ class LeonOrchestrator:
                 use_ml, self.strategy, self.risk_controller
             )
             
-            # Создаем визуализатор, если визуализация включена
-            if config["visualization"]["enabled"]:
-                self.visualizer = visualization_factory.create_visualizer()
-                
             # Устанавливаем флаг инициализации
             self.initialized = True
             
@@ -1267,13 +1147,17 @@ class LeonOrchestrator:
             # Запускаем компоненты
             await self._start_components()
             
+            # Запускаем визуализацию
+            await self.visualization_manager.start_visualization()
+            
             # Устанавливаем флаг работы
             self.running = True
             
             # Отправляем уведомление в Telegram
             await self._send_telegram_notification()
             
-            self.logger.info(f"Система запущена в режиме: {self.mode}")
+            current_mode = self.trading_mode_manager.get_current_mode()
+            self.logger.info(f"Система запущена в режиме: {current_mode}")
         except Exception as e:
             self.logger.error(f"Ошибка при запуске системы: {str(e)}")
             self.logger.debug(traceback.format_exc())
@@ -1282,8 +1166,8 @@ class LeonOrchestrator:
     async def _send_telegram_notification(self):
         """Отправляет уведомление о запуске системы в Telegram."""
         try:
-            if not hasattr(self, 'telegram') or self.telegram is None:
-                self.logger.warning("Telegram интеграция не инициализирована, уведомление не отправлено")
+            if not hasattr(self, 'telegram_bot') or self.telegram_bot is None:
+                self.logger.warning("Telegram бот не инициализирован, уведомление не отправлено")
                 return
                 
             # Получаем параметры из конфигурации
@@ -1296,10 +1180,11 @@ class LeonOrchestrator:
             take_profit = config.get("strategy", {}).get("params", {}).get("take_profit", 3.0)
             
             # Формируем сообщение
-            mode_emoji = "🧪" if self.mode == "dry" else "🔥" if self.mode == "real" else "📊"
+            current_mode = self.trading_mode_manager.get_current_mode()
+            mode_emoji = "🧪" if current_mode == "dry" else "🔥" if current_mode == "real" else "📊"
             message = f"📊 *Статус торгового бота*\n\n"
-            message += f"{mode_emoji} Режим: {self.mode.upper()}\n"
-            message += f"💱 Пара: {symbol}\n"
+            message += f"{mode_emoji} Режим: {current_mode.upper() if current_mode else 'Не установлен'}\n"
+            message += f"�� Пара: {symbol}\n"
             message += f"💰 Баланс: {balance:.2f} USDT\n"
             message += f"⚡ Плечо: {leverage}x\n"
             message += f"⚠️ Риск на сделку: {risk_per_trade}%\n"
@@ -1343,19 +1228,44 @@ class LeonOrchestrator:
             except Exception as e:
                 self.logger.error(f"Ошибка при отправке итогов сессии в Telegram: {e}")
         
+        # Останавливаем визуализацию
+        if hasattr(self, 'visualization_manager'):
+            try:
+                await self.visualization_manager.stop_visualization()
+            except Exception as e:
+                self.logger.error(f"Ошибка при остановке визуализации: {e}")
+        
         # Останавливаем все компоненты
         try:
-            # Останавливаем стратегию
-            if hasattr(self, 'strategy') and self.strategy:
-                await self.strategy.stop()
+            # Останавливаем стратегию, если она поддерживает метод stop
+            if hasattr(self, 'strategy') and self.strategy and hasattr(self.strategy, 'stop'):
+                try:
+                    await self.strategy.stop()
+                    self.logger.info("Стратегия остановлена")
+                except Exception as e:
+                    self.logger.error(f"Ошибка при остановке стратегии: {str(e)}")
+                    self.logger.debug(traceback.format_exc())
             
             # Останавливаем интеграцию с биржей
             if hasattr(self, 'exchange_integration') and self.exchange_integration:
                 await self.exchange_integration.stop()
             
+            # Закрываем соединение с Binance
+            if hasattr(self, 'binance_client') and self.binance_client:
+                try:
+                    if hasattr(self.binance_client, 'close'):
+                        await self.binance_client.close()
+                    self.logger.info("Соединение с Binance закрыто")
+                except Exception as e:
+                    self.logger.error(f"Ошибка при закрытии соединения с Binance: {str(e)}")
+                    self.logger.debug(traceback.format_exc())
+            
             # Останавливаем Telegram бота
             if hasattr(self, 'telegram_bot') and self.telegram_bot:
                 await self.telegram_bot.stop()
+            
+            # Сбрасываем флаг работы
+            self.running = False
             
             self.logger.info("Система успешно остановлена")
         except Exception as e:
@@ -1456,16 +1366,16 @@ class LeonOrchestrator:
             True, если режим успешно изменен, иначе False
         """
         try:
-            # Проверка валидности режима
-            if mode not in ['backtest', 'dry', 'real']:
-                self.logger.error(f"Неизвестный режим работы: {mode}")
+            # Проверка допустимости режима
+            if not self.trading_mode_manager.validate_mode(mode):
+                self.logger.error(f"Недопустимый режим работы: {mode}")
                 return False
                 
             # Остановка текущих компонентов
             await self.stop()
             
             # Установка нового режима
-            self.current_mode = mode
+            self.trading_mode_manager.current_mode = mode
             self.logger.info(f"Режим работы изменен на: {mode}")
             
             # Запуск системы в новом режиме
@@ -1473,7 +1383,7 @@ class LeonOrchestrator:
             
             return True
         except Exception as e:
-            self.logger.error(f"Ошибка при изменении режима работы: {e}")
+            self.logger.error(f"Ошибка при изменении режима работы: {str(e)}")
             self.logger.debug(traceback.format_exc())
             return False
 
@@ -1620,17 +1530,13 @@ class LeonOrchestrator:
 
     def _get_mode_display(self) -> str:
         """
-        Получение отображаемого названия режима.
+        Получение отображаемого имени режима.
         
         Returns:
-            Отображаемое название режима
+            str: Отображаемое имя режима
         """
-        mode_map = {
-            TradingModes.DRY: "Симуляция (Dry Mode)",
-            TradingModes.BACKTEST: "Бэктестинг",
-            TradingModes.REAL: "Реальная торговля"
-        }
-        return mode_map.get(self.current_mode, self.current_mode)
+        # Этот метод заменен на get_formatted_mode
+        return self.get_formatted_mode()
 
     async def _send_status_update(self):
         """Отправляет обновление статуса через Telegram."""
@@ -1641,7 +1547,7 @@ class LeonOrchestrator:
         try:
             config = self.config_manager.get_config()
             symbol = config["general"]["symbol"]
-            mode = self.current_mode
+            mode = self.trading_mode_manager.get_current_mode()
             balance = config["general"]["initial_balance"]
             leverage = config["general"]["leverage"]
             risk_per_trade = config["risk"]["max_position_size"]
@@ -1835,28 +1741,18 @@ class LeonOrchestrator:
         """Инициализирует компоненты системы."""
         config = self.config
         
-        # Инициализация визуализатора
-        if config["visualization"]["enabled"]:
-            try:
-                from visualization.console_ui import ConsoleVisualizer
-                self.visualizer = ConsoleVisualizer(
-                    name="console",
-                    config=config["visualization"],
-                    localization=self.localization_manager
-                )
-                # Явно указываем, какой класс используется
-                self.logger.info(f"Используется визуализатор: {self.visualizer.__class__.__name__}")
-            except Exception as e:
-                self.logger.error(f"Ошибка при создании визуализатора: {e}")
-                self.visualizer = None
-        else:
-            self.visualizer = None
+        # Компоненты инициализируются в конструкторе класса
+        pass
 
     async def _start_components(self) -> None:
         """Запуск компонентов системы."""
         # Запуск компонентов в зависимости от текущего режима
-        await self._start_components_for_mode(self.current_mode)
-
+        current_mode = self.trading_mode_manager.get_current_mode()
+        if current_mode:
+            await self._start_components_for_mode(current_mode)
+        else:
+            self.logger.warning("Не удалось запустить компоненты: режим работы не установлен")
+            
     async def _start_components_for_mode(self, mode: str) -> None:
         """Запуск компонентов для указанного режима."""
         if mode == 'dry':
@@ -1869,25 +1765,7 @@ class LeonOrchestrator:
     async def _start_dry_mode(self) -> None:
         """Запуск режима сухого тестирования."""
         # Реализация запуска режима сухого тестирования
-        if hasattr(self, 'visualizer') and self.visualizer:
-            # Передаем объект локализации в визуализатор
-            if not hasattr(self.visualizer, 'localization') or not self.visualizer.localization:
-                self.visualizer.localization = self.localization_manager
-            
-            self.visualizer.start()
-            self.logger.info("Запущен консольный визуализатор в режиме dry")
-            
-            # Запускаем периодическое обновление данных визуализатора
-            asyncio.create_task(self._periodic_visualization_update())
-
-    async def _periodic_visualization_update(self) -> None:
-        """Периодическое обновление данных визуализатора."""
-        try:
-            while self.running:
-                await self._update_visualization()
-                await asyncio.sleep(1)  # Обновляем каждую секунду
-        except Exception as e:
-            self.logger.error(f"Ошибка в цикле обновления визуализации: {e}")
+        pass
 
     async def _start_backtest_mode(self) -> None:
         """Запуск режима бэктестирования."""
@@ -1911,15 +1789,9 @@ class LeonOrchestrator:
                     self.logger.error(f"Ошибка при остановке стратегии: {str(e)}")
                     self.logger.debug(traceback.format_exc())
             
-            # Останавливаем визуализатор
-            if hasattr(self, 'visualizer') and self.visualizer:
-                try:
-                    if hasattr(self.visualizer, 'stop'):
-                        await self.visualizer.stop()
-                    self.logger.info("Визуализатор остановлен")
-                except Exception as e:
-                    self.logger.error(f"Ошибка при остановке визуализатора: {str(e)}")
-                    self.logger.debug(traceback.format_exc())
+            # Останавливаем интеграцию с биржей
+            if hasattr(self, 'exchange_integration') and self.exchange_integration:
+                await self.exchange_integration.stop()
             
             # Закрываем соединение с Binance
             if hasattr(self, 'binance_client') and self.binance_client:
@@ -2027,17 +1899,97 @@ class LeonOrchestrator:
         Returns:
             Визуализатор или None, если он не инициализирован
         """
-        return self.visualizer
+        if hasattr(self, 'visualization_manager') and self.visualization_manager:
+            # Возвращаем основной визуализатор
+            return self.visualization_manager.get_visualizer('console')
+        return None
     
-    def get_trader(self):
+    def get_trader(self) -> Optional[Any]:
         """
-        Получить трейдера.
+        Получает экземпляр трейдера.
         
         Returns:
-            Трейдер или None, если он не инициализирован
+            Экземпляр трейдера или None, если трейдер не инициализирован
         """
-        return self.trader
+        if hasattr(self, 'trader') and self.trader:
+            return self.trader
+        return None
     
+    async def add_signal(self, signal: Dict[str, Any]):
+        """
+        Добавляет новый торговый сигнал.
+        
+        Args:
+            signal: Информация о сигнале (должна содержать ключи 'action', 'confidence', 'timestamp')
+        """
+        with self._data_lock:
+            if not hasattr(self, '_signals'):
+                self._signals = []
+                
+            # Добавляем сигнал в начало списка
+            self._signals.insert(0, signal)
+            
+            # Ограничиваем размер списка
+            max_signals = 10
+            if len(self._signals) > max_signals:
+                self._signals = self._signals[:max_signals]
+                
+        self.logger.debug(f"Добавлен новый сигнал: {signal}")
+        
+        # Обновляем визуализацию, если доступна
+        if hasattr(self, 'visualization_manager') and self.visualization_manager:
+            await self.visualization_manager.update()
+    
+    async def update_indicators(self, new_indicators: Dict[str, Any]):
+        """
+        Обновляет значения индикаторов.
+        
+        Args:
+            new_indicators: Словарь с новыми значениями индикаторов
+        """
+        with self._data_lock:
+            if not hasattr(self, '_indicators'):
+                self._indicators = {
+                    "rsi": 50.0,
+                    "macd": 0.0,
+                    "macd_signal": 0.0,
+                    "bb_upper": 0.0,
+                    "bb_middle": 0.0,
+                    "bb_lower": 0.0
+                }
+                
+            self._indicators.update(new_indicators)
+        self.logger.debug(f"Индикаторы обновлены: {new_indicators}")
+        
+        # Обновляем визуализацию, если доступна
+        if hasattr(self, 'visualization_manager') and self.visualization_manager:
+            await self.visualization_manager.update()
+    
+    async def update_price(self, symbol: str, price: float):
+        """
+        Обновляет текущую цену.
+        
+        Args:
+            symbol: Символ торговой пары
+            price: Новая цена
+        """
+        if not hasattr(self, '_prices'):
+            self._prices = []
+            
+        # Добавляем новую цену в начало списка
+        self._prices.insert(0, price)
+        
+        # Ограничиваем размер списка
+        max_prices = 20
+        if len(self._prices) > max_prices:
+            self._prices = self._prices[:max_prices]
+            
+        self.logger.debug(f"Цена обновлена: {symbol} = {price}")
+        
+        # Обновляем визуализацию, если доступна
+        if hasattr(self, 'visualization_manager') and self.visualization_manager:
+            await self.visualization_manager.update()
+
     def is_running(self):
         """
         Проверить, запущена ли система.
@@ -2071,136 +2023,6 @@ class LeonOrchestrator:
         # Возвращаем последние цены
         return self._prices[:limit]
     
-    async def update_price(self, symbol: str, price: float):
-        """
-        Обновляет текущую цену.
-        
-        Args:
-            symbol: Символ торговой пары
-            price: Новая цена
-        """
-        if not hasattr(self, '_prices'):
-            self._prices = []
-            
-        # Добавляем новую цену в начало списка
-        self._prices.insert(0, price)
-        
-        # Ограничиваем размер списка
-        max_prices = 20
-        if len(self._prices) > max_prices:
-            self._prices = self._prices[:max_prices]
-            
-        self.logger.debug(f"Цена обновлена: {symbol} = {price}")
-    
-    def get_indicators(self):
-        """
-        Получает текущие значения индикаторов.
-        
-        Returns:
-            Словарь с текущими значениями индикаторов
-        """
-        if not hasattr(self, '_indicators'):
-            self._indicators = {
-                "rsi": 50.0,
-                "macd": 0.0,
-                "macd_signal": 0.0,
-                "bb_upper": 0.0,
-                "bb_middle": 0.0,
-                "bb_lower": 0.0
-            }
-            
-        return self._indicators
-    
-    def get_signals(self, limit: int = 3):
-        """
-        Получает последние торговые сигналы.
-        
-        Args:
-            limit: Максимальное количество сигналов для возврата
-            
-        Returns:
-            Список последних торговых сигналов
-        """
-        if not hasattr(self, '_signals'):
-            self._signals = []
-            
-        # Возвращаем последние сигналы
-        return self._signals[:limit]
-    
-    async def add_signal(self, signal: Dict[str, Any]):
-        """
-        Добавляет новый торговый сигнал.
-        
-        Args:
-            signal: Информация о сигнале (должна содержать ключи 'action', 'confidence', 'timestamp')
-        """
-        if not hasattr(self, '_signals'):
-            self._signals = []
-            
-        # Добавляем сигнал в начало списка
-        self._signals.insert(0, signal)
-        
-        # Ограничиваем размер списка
-        max_signals = 10
-        if len(self._signals) > max_signals:
-            self._signals = self._signals[:max_signals]
-            
-        self.logger.debug(f"Добавлен новый сигнал: {signal}")
-    
-    async def update_indicators(self, new_indicators: Dict[str, Any]):
-        """
-        Обновляет значения индикаторов.
-        
-        Args:
-            new_indicators: Словарь с новыми значениями индикаторов
-        """
-        if not hasattr(self, '_indicators'):
-            self._indicators = {
-                "rsi": 50.0,
-                "macd": 0.0,
-                "macd_signal": 0.0,
-                "bb_upper": 0.0,
-                "bb_middle": 0.0,
-                "bb_lower": 0.0
-            }
-            
-        self._indicators.update(new_indicators)
-        self.logger.debug(f"Индикаторы обновлены: {new_indicators}")
-
-    def get_trader(self) -> Optional[Any]:
-        """
-        Получает экземпляр трейдера.
-        
-        Returns:
-            Экземпляр трейдера или None, если трейдер не инициализирован
-        """
-        if hasattr(self, 'trader') and self.trader:
-            return self.trader
-        return None
-    
-    def get_recent_prices(self) -> List[float]:
-        """
-        Получает последние цены для визуализации.
-        
-        Returns:
-            Список последних цен
-        """
-        try:
-            # Получаем данные о ценах из маркет-дата провайдера
-            if hasattr(self, 'market_data_provider') and self.market_data_provider:
-                # Получаем последние N свечей
-                klines = self.market_data_provider.get_recent_klines(limit=10)
-                if klines:
-                    # Извлекаем цены закрытия из свечей
-                    prices = [float(kline['close']) for kline in klines]
-                    return prices
-                    
-            # Если не удалось получить данные из провайдера, возвращаем пустой список
-            return []
-        except Exception as e:
-            self.logger.warning(f"Ошибка при получении последних цен: {str(e)}")
-            return []
-    
     def get_indicators(self) -> Dict[str, Any]:
         """
         Получает значения индикаторов для визуализации.
@@ -2209,13 +2031,20 @@ class LeonOrchestrator:
             Словарь с индикаторами
         """
         try:
-            # Получаем индикаторы из стратегии
-            if hasattr(self, 'strategy') and self.strategy:
-                indicators = self.strategy.get_indicators()
-                return indicators
+            with self._data_lock:
+                # Получаем индикаторы из стратегии
+                if hasattr(self, 'strategy') and self.strategy:
+                    indicators = self.strategy.get_indicators()
+                    return indicators.copy() if isinstance(indicators, dict) else {}
+                    
+                # Если стратегия не инициализирована или индикаторы пусты
+                if not hasattr(self, '_indicators') or not self._indicators:
+                    # Делегируем инициализацию данных в VisualizationManager
+                    if hasattr(self, 'visualization_manager') and self.visualization_manager:
+                        self.visualization_manager._ensure_visualization_data()
                 
-            # Если стратегия не инициализирована, возвращаем пустой словарь
-            return {}
+                # Возвращаем копию словаря
+                return self._indicators.copy()
         except Exception as e:
             self.logger.warning(f"Ошибка при получении индикаторов: {str(e)}")
             return {}
@@ -2228,33 +2057,77 @@ class LeonOrchestrator:
             Список сигналов
         """
         try:
-            # Получаем сигналы из стратегии
-            if hasattr(self, 'strategy') and self.strategy:
-                signals = self.strategy.get_signals()
-                return signals
+            with self._data_lock:
+                # Получаем сигналы из стратегии
+                if hasattr(self, 'strategy') and self.strategy:
+                    signals = self.strategy.get_signals()
+                    return signals.copy() if isinstance(signals, list) else []
+                    
+                # Если стратегия не инициализирована или сигналы пусты
+                if not hasattr(self, '_signals') or not self._signals:
+                    # Делегируем инициализацию данных в VisualizationManager
+                    if hasattr(self, 'visualization_manager') and self.visualization_manager:
+                        self.visualization_manager._ensure_visualization_data()
                 
-            # Если стратегия не инициализирована, возвращаем пустой список
-            return []
+                # Возвращаем копию списка
+                return self._signals.copy()
         except Exception as e:
             self.logger.warning(f"Ошибка при получении сигналов: {str(e)}")
             return []
 
-    def _ensure_visualization_data(self):
-        """Гарантирует наличие базовых данных для визуализации."""
-        if not hasattr(self, '_prices') or self._prices is None:
-            self._prices = []
-            # Добавляем тестовые данные для начального отображения
-            import random
-            base_price = 50000.0
-            for i in range(10):
-                self._prices.append(base_price + random.uniform(-100, 100))
+    async def change_mode(self, mode: str) -> bool:
+        """
+        Изменение режима работы системы.
         
-        if not hasattr(self, '_indicators') or self._indicators is None:
-            self._indicators = {
-                "rsi": 50.0,
-                "macd": 0.0,
-                "macd_signal": 0.0
-            }
+        Args:
+            mode: Новый режим работы
+            
+        Returns:
+            bool: Успешность изменения режима
+        """
+        try:
+            # Проверка допустимости режима
+            if not self.trading_mode_manager.validate_mode(mode):
+                self.logger.error(f"Недопустимый режим работы: {mode}")
+                return False
+                
+            # Остановка текущих компонентов
+            await self.stop()
+            
+            # Установка нового режима
+            self.trading_mode_manager.current_mode = mode
+            self.logger.info(f"Режим работы изменен на: {mode}")
+            
+            # Запуск системы в новом режиме
+            await self.start()
+            
+            return True
+        except Exception as e:
+            self.logger.error(f"Ошибка при изменении режима работы: {str(e)}")
+            self.logger.debug(traceback.format_exc())
+            return False
+
+    def get_formatted_mode(self) -> str:
+        """
+        Получение форматированного режима работы.
         
-        if not hasattr(self, '_signals') or self._signals is None:
-            self._signals = []
+        Returns:
+            str: Форматированный режим работы
+        """
+        mode_map = {
+            TradingModes.DRY: "Симуляция (Dry Mode)",
+            TradingModes.BACKTEST: "Бэктестинг",
+            TradingModes.REAL: "Реальная торговля"
+        }
+        current_mode = self.trading_mode_manager.get_current_mode()
+        return mode_map.get(current_mode, current_mode)
+
+    def get_formatted_trading_mode(self) -> str:
+        """
+        Получение форматированного режима торговли.
+        
+        Returns:
+            str: Форматированный режим торговли
+        """
+        # Этот метод заменен на get_formatted_mode
+        return self.get_formatted_mode()

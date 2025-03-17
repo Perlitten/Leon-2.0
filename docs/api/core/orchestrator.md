@@ -1,288 +1,389 @@
-# Оркестратор (Orchestrator)
+# API оркестратора и управления состоянием
 
-Оркестратор является центральным компонентом Leon Trading Bot, который управляет жизненным циклом системы, координирует работу всех компонентов и обеспечивает переключение между различными режимами работы.
+## Обзор
 
-## Основные классы
+API оркестратора предоставляет интерфейс для управления всеми подсистемами бота Leon, включая функции управления состоянием, которые позволяют приостанавливать и возобновлять работу бота без полной остановки.
+
+## Классы
 
 ### LeonOrchestrator
 
-Главный класс оркестратора, который управляет всеми подсистемами.
+Центральный класс для управления всеми подсистемами бота.
 
 ```python
-from core.orchestrator import LeonOrchestrator
-
-# Создание экземпляра оркестратора
-orchestrator = LeonOrchestrator(config_path="config/config.yaml", dry_mode=False)
-
-# Запуск оркестратора
-orchestrator.start()
-
-# Получение статуса оркестратора
-status = orchestrator.get_status()
-print(f"Статус оркестратора: {status}")
-
-# Обработка команды
-result = orchestrator.process_command("set_mode", ["dry"])
-print(f"Результат выполнения команды: {result}")
-
-# Остановка оркестратора
-orchestrator.stop()
+class LeonOrchestrator:
+    def __init__(self, config_manager: ConfigManager, localization: LocalizationManager):
+        """
+        Инициализирует оркестратор.
+        
+        Args:
+            config_manager: Менеджер конфигурации
+            localization: Менеджер локализации
+        """
+        pass
+        
+    async def start(self, mode: str = "dry") -> bool:
+        """
+        Запускает бота в указанном режиме.
+        
+        Args:
+            mode: Режим работы бота ("dry", "backtest" или "live")
+            
+        Returns:
+            bool: Успешность запуска
+        """
+        pass
+        
+    async def stop(self) -> bool:
+        """
+        Останавливает бота.
+        
+        Returns:
+            bool: Успешность остановки
+        """
+        pass
+        
+    async def pause(self) -> bool:
+        """
+        Приостанавливает работу бота без полной остановки.
+        
+        Returns:
+            bool: Успешность приостановки
+        """
+        pass
+        
+    async def resume(self) -> bool:
+        """
+        Возобновляет работу бота после паузы.
+        
+        Returns:
+            bool: Успешность возобновления
+        """
+        pass
+        
+    def register_event_handler(self, event_name: str, handler: Callable) -> None:
+        """
+        Регистрирует обработчик события.
+        
+        Args:
+            event_name: Имя события
+            handler: Функция-обработчик события
+        """
+        pass
+        
+    def unregister_event_handler(self, event_name: str, handler: Callable) -> bool:
+        """
+        Отменяет регистрацию обработчика события.
+        
+        Args:
+            event_name: Имя события
+            handler: Функция-обработчик события
+            
+        Returns:
+            bool: Успешность отмены регистрации
+        """
+        pass
 ```
-
-#### Параметры конструктора
-
-- `config_path` (str, опционально): Путь к файлу конфигурации. По умолчанию: "config/config.yaml".
-- `dry_mode` (bool, опционально): Режим тестирования без сохранения изменений. По умолчанию: False.
-
-#### Методы
-
-- `start()`: Запуск оркестратора.
-- `stop()`: Остановка оркестратора.
-- `get_status()`: Получение текущего статуса оркестратора.
-- `process_command(command: str, args: List[str] = None)`: Обработка команды.
 
 ### EventBus
 
-Шина событий для обмена сообщениями между компонентами системы. Реализует паттерн "Наблюдатель" для асинхронной обработки событий.
+Система событий для коммуникации между компонентами.
 
 ```python
-from core.orchestrator import EventBus
-
-# Создание экземпляра шины событий
-event_bus = EventBus()
-
-# Подписка на событие
-def handle_event(data):
-    print(f"Получено событие: {data}")
-
-event_bus.subscribe("SYSTEM_STARTED", handle_event)
-
-# Публикация события
-event_bus.publish("SYSTEM_STARTED", {"timestamp": 1625097600})
-
-# Отписка от события
-event_bus.unsubscribe("SYSTEM_STARTED", handle_event)
+class EventBus:
+    def __init__(self):
+        """
+        Инициализирует шину событий.
+        """
+        pass
+        
+    async def emit(self, event_name: str, data: Dict[str, Any] = None) -> None:
+        """
+        Генерирует событие.
+        
+        Args:
+            event_name: Имя события
+            data: Данные события
+        """
+        pass
+        
+    def subscribe(self, event_name: str, handler: Callable) -> None:
+        """
+        Подписывается на событие.
+        
+        Args:
+            event_name: Имя события
+            handler: Функция-обработчик события
+        """
+        pass
+        
+    def unsubscribe(self, event_name: str, handler: Callable) -> bool:
+        """
+        Отписывается от события.
+        
+        Args:
+            event_name: Имя события
+            handler: Функция-обработчик события
+            
+        Returns:
+            bool: Успешность отписки
+        """
+        pass
 ```
-
-#### Методы
-
-- `subscribe(event_type: str, callback: Callable)`: Подписка на событие.
-- `unsubscribe(event_type: str, callback: Callable)`: Отписка от события.
-- `publish(event_type: str, data: Any = None)`: Публикация события.
-
-### TradingModeManager
-
-Менеджер режимов торговли. Управляет переключением между различными режимами работы системы.
-
-```python
-from core.orchestrator import TradingModeManager
-from core.config_manager import ConfigManager
-from core.orchestrator import EventBus
-
-# Создание экземпляра менеджера режимов торговли
-config_manager = ConfigManager("config/config.yaml")
-event_bus = EventBus()
-trading_mode_manager = TradingModeManager(config_manager, event_bus)
-
-# Инициализация менеджера режимов торговли
-trading_mode_manager.initialize()
-
-# Установка режима работы
-trading_mode_manager.set_mode("dry")
-
-# Получение текущего режима работы
-current_mode = trading_mode_manager.get_current_mode()
-print(f"Текущий режим работы: {current_mode}")
-```
-
-#### Параметры конструктора
-
-- `config_manager` (ConfigManager): Менеджер конфигурации.
-- `event_bus` (EventBus): Шина событий.
-
-#### Методы
-
-- `initialize()`: Инициализация менеджера режимов торговли.
-- `set_mode(mode: str)`: Установка режима работы.
-- `get_current_mode()`: Получение текущего режима работы.
-
-### MLIntegrationManager
-
-Менеджер интеграции с ML-моделями. Управляет загрузкой, оценкой и использованием ML-моделей для прогнозирования.
-
-```python
-from core.orchestrator import MLIntegrationManager
-from core.config_manager import ConfigManager
-from core.orchestrator import EventBus
-
-# Создание экземпляра менеджера интеграции с ML-моделями
-config_manager = ConfigManager("config/config.yaml")
-event_bus = EventBus()
-ml_integration_manager = MLIntegrationManager(config_manager, event_bus)
-
-# Инициализация менеджера интеграции с ML-моделями
-ml_integration_manager.initialize()
-
-# Установка активной модели
-ml_integration_manager.set_active_model("lstm")
-
-# Получение имени активной модели
-active_model = ml_integration_manager.get_active_model()
-print(f"Активная модель: {active_model}")
-
-# Получение предсказания от активной модели
-data = {"open": 100, "high": 105, "low": 95, "close": 102, "volume": 1000}
-prediction = ml_integration_manager.get_prediction(data)
-print(f"Предсказание: {prediction}")
-```
-
-#### Параметры конструктора
-
-- `config_manager` (ConfigManager): Менеджер конфигурации.
-- `event_bus` (EventBus): Шина событий.
-
-#### Методы
-
-- `initialize()`: Инициализация менеджера интеграции с ML-моделями.
-- `set_active_model(model_name: str)`: Установка активной модели.
-- `get_active_model()`: Получение имени активной модели.
-- `get_prediction(data: Any)`: Получение предсказания от активной модели.
 
 ### CommandProcessor
 
-Процессор команд. Обрабатывает команды пользователя и маршрутизирует их к соответствующим обработчикам.
+Обработчик команд.
 
 ```python
-from core.orchestrator import CommandProcessor
-from core.orchestrator import EventBus
-
-# Создание экземпляра процессора команд
-event_bus = EventBus()
-command_processor = CommandProcessor(event_bus)
-
-# Регистрация обработчика команды
-def handle_start_command(args):
-    print(f"Выполнение команды 'start' с аргументами: {args}")
-    return {"success": True, "message": "Система запущена"}
-
-command_processor.register_handler("start", handle_start_command)
-
-# Обработка команды
-result = command_processor.process_command("start", ["--verbose"])
-print(f"Результат выполнения команды: {result}")
+class CommandProcessor:
+    def __init__(self, orchestrator: LeonOrchestrator):
+        """
+        Инициализирует обработчик команд.
+        
+        Args:
+            orchestrator: Оркестратор
+        """
+        pass
+        
+    async def process_command(self, command: str, params: Dict[str, Any] = None) -> Dict[str, Any]:
+        """
+        Обрабатывает команду.
+        
+        Args:
+            command: Команда
+            params: Параметры команды
+            
+        Returns:
+            Dict[str, Any]: Результат выполнения команды
+        """
+        pass
+        
+    def register_command_handler(self, command: str, handler: Callable) -> None:
+        """
+        Регистрирует обработчик команды.
+        
+        Args:
+            command: Команда
+            handler: Функция-обработчик команды
+        """
+        pass
+        
+    def unregister_command_handler(self, command: str) -> bool:
+        """
+        Отменяет регистрацию обработчика команды.
+        
+        Args:
+            command: Команда
+            
+        Returns:
+            bool: Успешность отмены регистрации
+        """
+        pass
 ```
 
-#### Параметры конструктора
+### TradingModeManager
 
-- `event_bus` (EventBus): Шина событий.
+Менеджер режимов торговли.
 
-#### Методы
+```python
+class TradingModeManager:
+    def __init__(self, orchestrator: LeonOrchestrator):
+        """
+        Инициализирует менеджер режимов торговли.
+        
+        Args:
+            orchestrator: Оркестратор
+        """
+        pass
+        
+    async def set_mode(self, mode: str) -> bool:
+        """
+        Устанавливает режим торговли.
+        
+        Args:
+            mode: Режим торговли ("dry", "backtest" или "live")
+            
+        Returns:
+            bool: Успешность установки режима
+        """
+        pass
+        
+    def get_mode(self) -> str:
+        """
+        Возвращает текущий режим торговли.
+        
+        Returns:
+            str: Текущий режим торговли
+        """
+        pass
+```
 
-- `register_handler(command: str, handler: Callable)`: Регистрация обработчика команды.
-- `process_command(command: str, args: List[str] = None)`: Обработка команды.
+## Функции управления состоянием
 
-## Режимы работы
+### pause()
 
-Оркестратор поддерживает следующие режимы работы:
+Приостанавливает работу бота без полной остановки.
 
-- **Dry Mode (тестирование без реальных сделок)**: Режим для тестирования стратегий без реальных сделок. Все операции выполняются на виртуальном балансе.
-- **Backtesting (тестирование на исторических данных)**: Режим для тестирования стратегий на исторических данных. Позволяет оценить эффективность стратегии на прошлых данных.
-- **Real Trading (реальная торговля)**: Режим для реальной торговли на бирже. Все операции выполняются с реальными средствами.
+```python
+async def pause(self) -> bool:
+    """
+    Приостанавливает работу бота без полной остановки.
+    
+    Returns:
+        bool: Успешность приостановки
+    """
+    if not self.running:
+        self.logger.warning("Оркестратор не запущен")
+        return False
+        
+    if self.paused:
+        self.logger.warning("Оркестратор уже приостановлен")
+        return True
+        
+    try:
+        self.logger.info("Приостановка работы оркестратора")
+        
+        # Приостанавливаем торговлю
+        if hasattr(self, 'trader') and self.trader:
+            await self.trader.pause()
+            
+        # Устанавливаем флаг паузы
+        self.paused = True
+        
+        # Генерируем событие о приостановке
+        await self.event_bus.emit("orchestrator_paused", {
+            "timestamp": datetime.now().isoformat()
+        })
+        
+        return True
+    except Exception as e:
+        self.logger.error(f"Ошибка при приостановке оркестратора: {str(e)}")
+        self.logger.debug(traceback.format_exc())
+        return False
+```
+
+### resume()
+
+Возобновляет работу бота после паузы.
+
+```python
+async def resume(self) -> bool:
+    """
+    Возобновляет работу бота после паузы.
+    
+    Returns:
+        bool: Успешность возобновления
+    """
+    if not self.running:
+        self.logger.warning("Оркестратор не запущен")
+        return False
+        
+    if not self.paused:
+        self.logger.warning("Оркестратор не приостановлен")
+        return True
+        
+    try:
+        self.logger.info("Возобновление работы оркестратора")
+        
+        # Возобновляем торговлю
+        if hasattr(self, 'trader') and self.trader:
+            await self.trader.resume()
+            
+        # Сбрасываем флаг паузы
+        self.paused = False
+        
+        # Генерируем событие о возобновлении
+        await self.event_bus.emit("orchestrator_resumed", {
+            "timestamp": datetime.now().isoformat()
+        })
+        
+        return True
+    except Exception as e:
+        self.logger.error(f"Ошибка при возобновлении работы оркестратора: {str(e)}")
+        self.logger.debug(traceback.format_exc())
+        return False
+```
 
 ## События
 
-Оркестратор использует систему событий для обмена сообщениями между компонентами. Основные типы событий:
+При приостановке и возобновлении работы бота генерируются следующие события:
 
-- **Системные события**: События, связанные с жизненным циклом системы (запуск, остановка, изменение режима работы и т.д.).
-- **Торговые события**: События, связанные с торговыми операциями (открытие позиции, закрытие позиции, изменение цены и т.д.).
-- **ML-события**: События, связанные с ML-моделями (загрузка модели, получение предсказания и т.д.).
-- **События визуализации**: События, связанные с визуализацией данных (обновление графика, изменение масштаба и т.д.).
+- `orchestrator_paused` - при успешной приостановке работы бота
+- `orchestrator_resumed` - при успешном возобновлении работы бота
 
-## Команды
+### Формат данных события orchestrator_paused
 
-Оркестратор поддерживает следующие команды:
+```json
+{
+    "timestamp": "2023-03-16T15:30:45.123456"
+}
+```
 
-- **start**: Запуск системы.
-- **stop**: Остановка системы.
-- **status**: Получение текущего статуса системы.
-- **set_mode**: Установка режима работы.
-- **set_model**: Установка активной ML-модели.
+### Формат данных события orchestrator_resumed
+
+```json
+{
+    "timestamp": "2023-03-16T15:35:12.654321"
+}
+```
 
 ## Примеры использования
 
-### Запуск системы в режиме тестирования
+### Приостановка работы бота
 
 ```python
 from core.orchestrator import LeonOrchestrator
+from core.config_manager import ConfigManager
+from core.localization import LocalizationManager
 
-# Создание экземпляра оркестратора в режиме тестирования
-orchestrator = LeonOrchestrator(dry_mode=True)
+# Создание экземпляра оркестратора
+config_manager = ConfigManager("config.yaml")
+localization = LocalizationManager("locales")
+orchestrator = LeonOrchestrator(config_manager, localization)
 
-# Запуск оркестратора
-orchestrator.start()
+# Запуск бота
+await orchestrator.start(mode="dry")
 
-# Установка режима работы "dry"
-orchestrator.process_command("set_mode", ["dry"])
+# Приостановка работы бота
+success = await orchestrator.pause()
+if success:
+    print("Бот успешно приостановлен")
+else:
+    print("Не удалось приостановить бота")
+```
 
-# Установка активной модели
-orchestrator.process_command("set_model", ["lstm"])
+### Возобновление работы бота
 
-# Получение статуса системы
-status = orchestrator.process_command("status")
-print(f"Статус системы: {status}")
-
-# Остановка оркестратора
-orchestrator.stop()
+```python
+# Возобновление работы бота
+success = await orchestrator.resume()
+if success:
+    print("Работа бота успешно возобновлена")
+else:
+    print("Не удалось возобновить работу бота")
 ```
 
 ### Обработка событий
 
 ```python
-from core.orchestrator import LeonOrchestrator, EventBus
-from core.constants import EVENT_TYPES
+# Регистрация обработчика события приостановки
+async def on_pause(data):
+    print(f"Бот приостановлен в {data['timestamp']}")
+    # Дополнительные действия при приостановке
 
-# Создание экземпляра оркестратора
-orchestrator = LeonOrchestrator()
+orchestrator.register_event_handler("orchestrator_paused", on_pause)
 
-# Получение шины событий
-event_bus = orchestrator._event_bus
+# Регистрация обработчика события возобновления
+async def on_resume(data):
+    print(f"Работа бота возобновлена в {data['timestamp']}")
+    # Дополнительные действия при возобновлении
 
-# Подписка на событие открытия позиции
-def handle_position_opened(data):
-    position = data.get("position")
-    print(f"Открыта позиция: {position}")
-
-event_bus.subscribe(EVENT_TYPES["TRADE"]["POSITION_OPENED"], handle_position_opened)
-
-# Запуск оркестратора
-orchestrator.start()
-
-# Остановка оркестратора
-orchestrator.stop()
+orchestrator.register_event_handler("orchestrator_resumed", on_resume)
 ```
 
-### Создание собственного обработчика команд
+## Ограничения
 
-```python
-from core.orchestrator import LeonOrchestrator
-
-# Создание экземпляра оркестратора
-orchestrator = LeonOrchestrator()
-
-# Регистрация обработчика команды
-def handle_custom_command(args):
-    print(f"Выполнение пользовательской команды с аргументами: {args}")
-    return {"success": True, "message": "Пользовательская команда выполнена"}
-
-orchestrator._command_processor.register_handler("custom", handle_custom_command)
-
-# Запуск оркестратора
-orchestrator.start()
-
-# Обработка пользовательской команды
-result = orchestrator.process_command("custom", ["arg1", "arg2"])
-print(f"Результат выполнения команды: {result}")
-
-# Остановка оркестратора
-orchestrator.stop()
-``` 
+- Функции управления состоянием доступны только когда бот запущен
+- При приостановке бота некоторые компоненты могут продолжать работу (например, мониторинг рынка)
+- Возобновление работы бота возможно только если он был приостановлен 

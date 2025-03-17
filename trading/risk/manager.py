@@ -6,18 +6,18 @@
 
 import logging
 from typing import Dict, Any, List, Optional, Tuple
+from datetime import datetime, timedelta
 
 from trading.risk.position_sizer import PositionSizer
+
 
 class RiskManager:
     """
     Класс для управления рисками при торговле.
     
-    Отвечает за:
-    - Расчет размера позиции
-    - Установку стоп-лоссов и тейк-профитов
-    - Контроль максимальных убытков
-    - Управление риском на портфель
+    Отвечает за контроль рисков, расчет размеров позиций,
+    установку стоп-лоссов и тейк-профитов, а также за
+    соблюдение ограничений по убыткам и количеству сделок.
     """
     
     def __init__(self, config: Dict[str, Any]):
@@ -30,243 +30,262 @@ class RiskManager:
         self.logger = logging.getLogger(self.__class__.__name__)
         self.config = config
         
-        # Создание калькулятора размера позиции
+        # Основные параметры риска
+        self.max_daily_loss = config.get("max_daily_loss", 5.0)  # Максимальный дневной убыток в процентах
+        self.max_daily_trades = config.get("max_daily_trades", 10)  # Максимальное количество сделок в день
+        self.max_open_positions = config.get("max_open_positions", 5)  # Максимальное количество открытых позиций
+        self.default_stop_loss = config.get("default_stop_loss", 2.0)  # Стоп-лосс по умолчанию в процентах
+        self.default_take_profit = config.get("default_take_profit", 3.0)  # Тейк-профит по умолчанию в процентах
+        
+        # Инициализация калькулятора размера позиции
         position_sizer_config = config.get("position_sizer", {})
         self.position_sizer = PositionSizer(
             default_method=position_sizer_config.get("method", "fixed_risk"),
-            default_params=position_sizer_config.get("params", {})
+            default_params=position_sizer_config.get("params", {"risk_percent": 1.0})
         )
         
-        # Параметры управления рисками
-        self.max_open_positions = config.get("max_open_positions", 5)
-        self.max_daily_loss = config.get("max_daily_loss", 5.0)  # Процент от баланса
-        self.max_position_size = config.get("max_position_size", 10.0)  # Процент от баланса
-        self.default_stop_loss = config.get("default_stop_loss", 2.0)  # Процент от цены входа
-        self.default_take_profit = config.get("default_take_profit", 3.0)  # Процент от цены входа
+        # Статистика торговли
+        self.daily_trades = []  # Список сделок за день
+        self.daily_pnl = 0.0  # Прибыль/убыток за день
+        self.open_positions = []  # Список открытых позиций
+        self.last_reset = datetime.now()  # Время последнего сброса статистики
         
-        # Статистика
-        self.daily_pnl = 0.0
-        self.total_pnl = 0.0
-        self.win_count = 0
-        self.loss_count = 0
-        self.open_positions = []
-        self.closed_positions = []
+        self.logger.info(f"Инициализирован менеджер рисков (max_daily_loss={self.max_daily_loss}%, "
+                        f"max_daily_trades={self.max_daily_trades}, "
+                        f"max_open_positions={self.max_open_positions})")
     
-    def calculate_position_size(self, balance: float, entry_price: float, stop_loss: float,
-                               method: Optional[str] = None, params: Optional[Dict[str, Any]] = None) -> float:
+    async def assess_risk(self, signals: List[Dict[str, Any]], market_data: Dict[str, Any]) -> Dict[str, Any]:
         """
-        Расчет размера позиции с учетом ограничений.
+        Оценка риска для списка сигналов.
         
         Args:
-            balance: Доступный баланс
-            entry_price: Цена входа
-            stop_loss: Цена стоп-лосса
-            method: Метод расчета
-            params: Параметры метода
+            signals: Список торговых сигналов
+            market_data: Рыночные данные
             
         Returns:
-            Размер позиции
+            Dict[str, Any]: Результат оценки риска
         """
-        # Расчет размера позиции
+        # Проверяем, нужно ли сбросить дневную статистику
+        self._check_daily_reset()
+        
+        # Если нет сигналов, возвращаем разрешение на торговлю
+        if not signals:
+            return {
+                "can_trade": True,
+                "reason": "Нет сигналов для оценки",
+                "position_size": 0.0
+            }
+        
+        # Проверяем ограничения по количеству сделок
+        if len(self.daily_trades) >= self.max_daily_trades:
+            return {
+                "can_trade": False,
+                "reason": f"Достигнут лимит дневных сделок ({self.max_daily_trades})",
+                "position_size": 0.0
+            }
+        
+        # Проверяем ограничения по дневному убытку
+        if self.daily_pnl <= -self.max_daily_loss:
+            return {
+                "can_trade": False,
+                "reason": f"Достигнут лимит дневного убытка ({self.max_daily_loss}%)",
+                "position_size": 0.0
+            }
+        
+        # Проверяем ограничения по количеству открытых позиций
+        if len(self.open_positions) >= self.max_open_positions:
+            return {
+                "can_trade": False,
+                "reason": f"Достигнут лимит открытых позиций ({self.max_open_positions})",
+                "position_size": 0.0
+            }
+        
+        # Находим самый сильный сигнал
+        strongest_signal = max(signals, key=lambda x: x.get("strength", 0))
+        
+        # Получаем текущий баланс (заглушка)
+        balance = market_data.get("balance", 1000.0)
+        
+        # Получаем текущую цену
+        symbol = strongest_signal.get("symbol", "BTCUSDT")
+        current_price = market_data.get("price", {}).get(symbol, 0.0)
+        
+        if current_price <= 0:
+            return {
+                "can_trade": False,
+                "reason": "Некорректная цена актива",
+                "position_size": 0.0
+            }
+        
+        # Рассчитываем стоп-лосс и тейк-профит
+        stop_loss_percent = strongest_signal.get("stop_loss", self.default_stop_loss)
+        take_profit_percent = strongest_signal.get("take_profit", self.default_take_profit)
+        
+        # Рассчитываем цены стоп-лосса и тейк-профита
+        direction = strongest_signal.get("type", "buy")
+        
+        if direction == "buy":
+            stop_loss_price = current_price * (1 - stop_loss_percent / 100)
+            take_profit_price = current_price * (1 + take_profit_percent / 100)
+        else:  # sell
+            stop_loss_price = current_price * (1 + stop_loss_percent / 100)
+            take_profit_price = current_price * (1 - take_profit_percent / 100)
+        
+        # Рассчитываем размер позиции
         position_size = self.position_sizer.calculate(
             balance=balance,
-            entry_price=entry_price,
-            stop_loss=stop_loss,
-            method=method,
-            params=params
+            entry_price=current_price,
+            stop_loss=stop_loss_price,
+            method="fixed_risk",
+            params={"risk_percent": 1.0}
         )
         
-        # Проверка ограничений
-        max_position_value = balance * (self.max_position_size / 100)
-        max_position_size = max_position_value / entry_price
-        
-        # Ограничение размера позиции
-        position_size = min(position_size, max_position_size)
-        
-        return position_size
+        # Возвращаем результат оценки риска
+        return {
+            "can_trade": True,
+            "reason": "Торговля разрешена",
+            "position_size": position_size,
+            "stop_loss": stop_loss_price,
+            "take_profit": take_profit_price,
+            "risk_reward_ratio": take_profit_percent / stop_loss_percent
+        }
     
-    def calculate_stop_loss(self, entry_price: float, direction: str) -> float:
+    def register_trade(self, trade: Dict[str, Any]) -> None:
         """
-        Расчет уровня стоп-лосса.
+        Регистрация новой сделки.
         
         Args:
-            entry_price: Цена входа
-            direction: Направление сделки ("BUY" или "SELL")
-            
-        Returns:
-            Уровень стоп-лосса
+            trade: Информация о сделке
         """
-        stop_loss_percent = self.default_stop_loss
+        # Проверяем, нужно ли сбросить дневную статистику
+        self._check_daily_reset()
         
-        if direction == "BUY":
-            return entry_price * (1 - stop_loss_percent / 100)
-        else:  # SELL
-            return entry_price * (1 + stop_loss_percent / 100)
+        # Добавляем сделку в список дневных сделок
+        self.daily_trades.append(trade)
+        
+        # Если это открытие позиции, добавляем ее в список открытых позиций
+        if trade.get("action") in ["buy", "sell"]:
+            self.open_positions.append(trade)
+            self.logger.info(f"Открыта новая позиция: {trade.get('symbol')} {trade.get('action')} "
+                            f"(размер: {trade.get('amount')})")
+        
+        # Если это закрытие позиции, обновляем список открытых позиций и дневной P&L
+        elif trade.get("action") in ["close_buy", "close_sell"]:
+            # Находим соответствующую открытую позицию
+            position_id = trade.get("position_id")
+            for i, position in enumerate(self.open_positions):
+                if position.get("id") == position_id:
+                    # Удаляем позицию из списка открытых
+                    closed_position = self.open_positions.pop(i)
+                    
+                    # Рассчитываем P&L
+                    pnl = trade.get("pnl", 0.0)
+                    self.daily_pnl += pnl
+                    
+                    self.logger.info(f"Закрыта позиция: {closed_position.get('symbol')} "
+                                    f"(P&L: {pnl:.2f}, дневной P&L: {self.daily_pnl:.2f})")
+                    break
     
-    def calculate_take_profit(self, entry_price: float, direction: str) -> float:
+    def get_position_size(self, balance: float, entry_price: float, stop_loss_price: float,
+                         method: str = "fixed_risk", params: Optional[Dict[str, Any]] = None) -> float:
         """
-        Расчет уровня тейк-профита.
-        
-        Args:
-            entry_price: Цена входа
-            direction: Направление сделки ("BUY" или "SELL")
-            
-        Returns:
-            Уровень тейк-профита
-        """
-        take_profit_percent = self.default_take_profit
-        
-        if direction == "BUY":
-            return entry_price * (1 + take_profit_percent / 100)
-        else:  # SELL
-            return entry_price * (1 - take_profit_percent / 100)
-    
-    def can_open_position(self, balance: float) -> Tuple[bool, str]:
-        """
-        Проверка возможности открытия новой позиции.
+        Расчет размера позиции.
         
         Args:
             balance: Текущий баланс
+            entry_price: Цена входа
+            stop_loss_price: Цена стоп-лосса
+            method: Метод расчета размера позиции
+            params: Параметры для метода расчета
             
         Returns:
-            Кортеж (можно ли открыть позицию, причина)
+            float: Размер позиции
         """
-        # Проверка количества открытых позиций
-        if len(self.open_positions) >= self.max_open_positions:
-            return False, f"Достигнуто максимальное количество открытых позиций ({self.max_open_positions})"
-        
-        # Проверка дневного убытка
-        max_loss = balance * (self.max_daily_loss / 100)
-        if self.daily_pnl < -max_loss:
-            return False, f"Достигнут максимальный дневной убыток ({self.max_daily_loss}%)"
-        
-        return True, ""
+        return self.position_sizer.calculate(
+            balance=balance,
+            entry_price=entry_price,
+            stop_loss=stop_loss_price,
+            method=method,
+            params=params
+        )
     
-    def add_position(self, position: Dict[str, Any]) -> None:
+    def get_stop_loss_price(self, entry_price: float, direction: str, 
+                          percent: Optional[float] = None) -> float:
         """
-        Добавление новой позиции.
+        Расчет цены стоп-лосса.
         
         Args:
-            position: Информация о позиции
-        """
-        self.open_positions.append(position)
-        self.logger.info(f"Открыта новая позиция: {position}")
-    
-    def close_position(self, position: Dict[str, Any], exit_price: float, pnl: float) -> None:
-        """
-        Закрытие позиции.
-        
-        Args:
-            position: Информация о позиции
-            exit_price: Цена выхода
-            pnl: Прибыль/убыток
-        """
-        # Обновление позиции
-        position["exit_price"] = exit_price
-        position["pnl"] = pnl
-        position["status"] = "closed"
-        
-        # Перемещение позиции из открытых в закрытые
-        self.open_positions.remove(position)
-        self.closed_positions.append(position)
-        
-        # Обновление статистики
-        self.daily_pnl += pnl
-        self.total_pnl += pnl
-        
-        if pnl > 0:
-            self.win_count += 1
-        else:
-            self.loss_count += 1
-        
-        self.logger.info(f"Закрыта позиция: {position}")
-    
-    def get_position(self, position_id: str) -> Optional[Dict[str, Any]]:
-        """
-        Получение информации о позиции по ID.
-        
-        Args:
-            position_id: ID позиции
+            entry_price: Цена входа
+            direction: Направление сделки ('buy' или 'sell')
+            percent: Процент стоп-лосса (если None, используется значение по умолчанию)
             
         Returns:
-            Информация о позиции или None, если позиция не найдена
+            float: Цена стоп-лосса
         """
-        for position in self.open_positions:
-            if position.get("id") == position_id:
-                return position
+        stop_loss_percent = percent if percent is not None else self.default_stop_loss
         
-        return None
+        if direction == "buy":
+            return entry_price * (1 - stop_loss_percent / 100)
+        else:  # sell
+            return entry_price * (1 + stop_loss_percent / 100)
     
-    def get_open_positions(self) -> List[Dict[str, Any]]:
+    def get_take_profit_price(self, entry_price: float, direction: str, 
+                            percent: Optional[float] = None) -> float:
         """
-        Получение списка открытых позиций.
-        
-        Returns:
-            Список открытых позиций
-        """
-        return self.open_positions
-    
-    def get_closed_positions(self, limit: int = 10) -> List[Dict[str, Any]]:
-        """
-        Получение списка закрытых позиций.
+        Расчет цены тейк-профита.
         
         Args:
-            limit: Максимальное количество позиций
+            entry_price: Цена входа
+            direction: Направление сделки ('buy' или 'sell')
+            percent: Процент тейк-профита (если None, используется значение по умолчанию)
             
         Returns:
-            Список закрытых позиций
+            float: Цена тейк-профита
         """
-        return self.closed_positions[-limit:]
+        take_profit_percent = percent if percent is not None else self.default_take_profit
+        
+        if direction == "buy":
+            return entry_price * (1 + take_profit_percent / 100)
+        else:  # sell
+            return entry_price * (1 - take_profit_percent / 100)
     
-    def get_statistics(self) -> Dict[str, Any]:
+    def get_risk_stats(self) -> Dict[str, Any]:
         """
-        Получение статистики торговли.
+        Получение статистики по рискам.
         
         Returns:
-            Статистика торговли
+            Dict[str, Any]: Статистика по рискам
         """
-        total_trades = self.win_count + self.loss_count
-        win_rate = self.win_count / total_trades if total_trades > 0 else 0
-        
         return {
+            "daily_trades_count": len(self.daily_trades),
+            "max_daily_trades": self.max_daily_trades,
             "daily_pnl": self.daily_pnl,
-            "total_pnl": self.total_pnl,
-            "win_count": self.win_count,
-            "loss_count": self.loss_count,
-            "total_trades": total_trades,
-            "win_rate": win_rate,
+            "max_daily_loss": self.max_daily_loss,
             "open_positions_count": len(self.open_positions),
-            "closed_positions_count": len(self.closed_positions)
+            "max_open_positions": self.max_open_positions,
+            "last_reset": self.last_reset.isoformat()
         }
     
-    def reset_daily_statistics(self) -> None:
+    def _check_daily_reset(self) -> None:
         """
-        Сброс дневной статистики.
+        Проверка необходимости сброса дневной статистики.
         """
-        self.daily_pnl = 0.0
-        self.logger.info("Дневная статистика сброшена")
+        now = datetime.now()
+        
+        # Если прошел день с момента последнего сброса, сбрасываем статистику
+        if now.date() > self.last_reset.date():
+            self.daily_trades = []
+            self.daily_pnl = 0.0
+            self.last_reset = now
+            
+            self.logger.info("Сброс дневной статистики торговли")
     
-    def update_config(self, config: Dict[str, Any]) -> None:
+    def reset_stats(self) -> None:
         """
-        Обновление конфигурации менеджера рисков.
-        
-        Args:
-            config: Новая конфигурация
+        Сброс всей статистики.
         """
-        self.config.update(config)
+        self.daily_trades = []
+        self.daily_pnl = 0.0
+        self.last_reset = datetime.now()
         
-        # Обновление параметров
-        self.max_open_positions = self.config.get("max_open_positions", self.max_open_positions)
-        self.max_daily_loss = self.config.get("max_daily_loss", self.max_daily_loss)
-        self.max_position_size = self.config.get("max_position_size", self.max_position_size)
-        self.default_stop_loss = self.config.get("default_stop_loss", self.default_stop_loss)
-        self.default_take_profit = self.config.get("default_take_profit", self.default_take_profit)
-        
-        # Обновление калькулятора размера позиции
-        position_sizer_config = self.config.get("position_sizer", {})
-        self.position_sizer = PositionSizer(
-            default_method=position_sizer_config.get("method", self.position_sizer.default_method),
-            default_params=position_sizer_config.get("params", self.position_sizer.default_params)
-        )
-        
-        self.logger.info("Конфигурация менеджера рисков обновлена") 
+        self.logger.info("Сброс всей статистики торговли") 

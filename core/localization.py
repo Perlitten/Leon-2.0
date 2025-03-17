@@ -215,38 +215,38 @@ class LocalizationManager:
         logger.info(f"Установлен язык: {language}")
         return True
     
-    def get_text(self, key: str, default: Optional[str] = None, **kwargs) -> str:
+    def get_text(self, key: str, default: str = None, **kwargs) -> str:
         """
         Получает локализованный текст по ключу.
         
         Args:
-            key (str): Ключ для поиска текста (формат: "section.subsection.key")
-            default (Optional[str]): Текст по умолчанию, если ключ не найден
+            key (str): Ключ текста в формате "section.subsection.key"
+            default (str, optional): Текст по умолчанию, если ключ не найден
             **kwargs: Параметры для форматирования текста
             
         Returns:
             str: Локализованный текст
         """
-        # Пытаемся получить текст для текущего языка
+        # Получаем текст для текущего языка
         text = self._get_text_by_key(self.current_language, key)
         
-        # Если текст не найден и текущий язык не является языком по умолчанию,
-        # пытаемся получить текст для языка по умолчанию
+        # Если текст не найден, пробуем получить его для языка по умолчанию
         if text is None and self.current_language != self.default_language:
             text = self._get_text_by_key(self.default_language, key)
         
-        # Если текст все еще не найден, используем значение по умолчанию или сам ключ
+        # Если текст все еще не найден, используем значение по умолчанию
         if text is None:
-            text = default if default is not None else key
+            if default is not None:
+                return default
+            return f"[{key}]"  # Возвращаем ключ в квадратных скобках
         
-        # Форматируем текст с переданными параметрами
-        try:
-            if kwargs:
-                text = text.format(**kwargs)
-        except KeyError as e:
-            logger.warning(f"Отсутствует параметр {e} для форматирования текста: {key}")
-        except Exception as e:
-            logger.warning(f"Ошибка при форматировании текста {key}: {e}")
+        # Форматируем текст, если переданы параметры
+        if kwargs and isinstance(text, str):
+            try:
+                return text.format(**kwargs)
+            except KeyError as e:
+                logger.warning(f"Отсутствует ключ {e} для форматирования текста '{key}'")
+                return text
         
         return text
     
@@ -384,6 +384,78 @@ class LocalizationManager:
             elif isinstance(value, str):
                 if not prefix or path.startswith(prefix):
                     keys.append(path)
+    
+    def update_text(self, key: str, value: str, language: str = None) -> bool:
+        """
+        Обновляет локализованный текст по ключу.
+        
+        Args:
+            key (str): Ключ текста в формате "section.subsection.key"
+            value (str): Новое значение текста
+            language (str, optional): Язык для обновления (по умолчанию текущий)
+            
+        Returns:
+            bool: True, если обновление успешно, иначе False
+        """
+        if language is None:
+            language = self.current_language
+        
+        if language not in self.texts:
+            if not self.load_language(language):
+                return False
+        
+        # Разбиваем ключ на части
+        parts = key.split('.')
+        
+        # Получаем ссылку на словарь текстов для указанного языка
+        current_dict = self.texts[language]
+        
+        # Проходим по всем частям ключа, кроме последней
+        for i, part in enumerate(parts[:-1]):
+            # Если текущая часть не существует в словаре, создаем новый словарь
+            if part not in current_dict:
+                current_dict[part] = {}
+            
+            # Если значение не является словарем, заменяем его на словарь
+            if not isinstance(current_dict[part], dict):
+                current_dict[part] = {}
+            
+            # Переходим к следующему уровню
+            current_dict = current_dict[part]
+        
+        # Устанавливаем значение для последней части ключа
+        current_dict[parts[-1]] = value
+        
+        # Сохраняем изменения в файл, если не в режиме dry_mode
+        if not self.dry_mode:
+            self._save_language(language)
+        
+        return True
+    
+    def _save_language(self, language: str) -> bool:
+        """
+        Сохраняет тексты для указанного языка в файл.
+        
+        Args:
+            language (str): Код языка для сохранения
+            
+        Returns:
+            bool: True, если сохранение успешно, иначе False
+        """
+        if self.dry_mode:
+            return True
+        
+        file_path = os.path.join(self.locales_dir, f"{language}.yaml")
+        
+        try:
+            with open(file_path, 'w', encoding='utf-8') as file:
+                yaml.dump(self.texts[language], file, default_flow_style=False, allow_unicode=True)
+            
+            logger.info(f"Сохранен язык: {language}")
+            return True
+        except Exception as e:
+            logger.error(f"Ошибка при сохранении языка {language}: {e}")
+            return False
 
 
 # Создаем глобальный экземпляр менеджера локализации

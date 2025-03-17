@@ -8,6 +8,35 @@ import logging
 from abc import ABC, abstractmethod
 from typing import Dict, Any, List, Optional, Union, Tuple
 
+class StrategyConfig:
+    """
+    Класс конфигурации для торговых стратегий.
+    
+    Содержит общие параметры, используемые всеми стратегиями.
+    """
+    
+    def __init__(self, 
+                 stop_loss: float, 
+                 take_profit: float, 
+                 risk_per_trade: float, 
+                 use_trailing_stop: bool = False, 
+                 trailing_stop_activation: float = 0.5):
+        """
+        Инициализация конфигурации стратегии.
+        
+        Args:
+            stop_loss: Процент стоп-лосса (например, 2.0 для 2%)
+            take_profit: Процент тейк-профита (например, 3.0 для 3%)
+            risk_per_trade: Процент риска на сделку от баланса (например, 1.0 для 1%)
+            use_trailing_stop: Использовать ли трейлинг-стоп
+            trailing_stop_activation: Процент активации трейлинг-стопа (например, 0.5 для 0.5%)
+        """
+        self.stop_loss = stop_loss
+        self.take_profit = take_profit
+        self.risk_per_trade = risk_per_trade
+        self.use_trailing_stop = use_trailing_stop
+        self.trailing_stop_activation = trailing_stop_activation
+
 class StrategyBase(ABC):
     """
     Базовый абстрактный класс для торговых стратегий.

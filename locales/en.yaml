@@ -34,6 +34,16 @@ trading:
   backtest_started: "Backtest started for {symbol} from {start_date} to {end_date}"
   backtest_completed: "Backtest completed. Result: {profit_loss} ({profit_loss_percent}%)"
   signal_generated: "Signal generated: {symbol} {signal_type} {price}"
+  directions:
+    buy: "BUY"
+    sell: "SELL"
+  price: "Price"
+  volume: "Volume"
+  pnl: "P&L"
+  modes:
+    dry: "Test Mode"
+    real: "Real Trading"
+    backtest: "Backtesting"
 
 notifications:
   telegram:
@@ -75,6 +85,14 @@ notifications:
     mode_changed_error: "❌ Error changing operation mode."
     quote_open: "Don't count money until it turns into a stable flow. Focus on the process."
     quote_close: "Waves can be high, but the ship sails forward. The main thing is to keep the right course."
+    status_update: "Trading Bot Status"
+    mode: "Mode"
+    symbol: "Pair"
+    balance: "Balance"
+    leverage: "Leverage"
+    risk_per_trade: "Risk per trade"
+    stop_loss: "Stop Loss"
+    take_profit: "Take Profit"
 
 ui:
   dashboard:
@@ -89,6 +107,32 @@ ui:
     stop_bot: "Stop Bot"
     refresh: "Refresh"
     last_update: "Last update: {time}"
+  
+  settings_menu:
+    title: "⚙️  LEON TRADING BOT - SETTINGS ⚙️"
+    general_section: "🔧 GENERAL SETTINGS:"
+    trading_pair: "Trading pair: {symbol}"
+    kline_interval: "Candle interval: {interval}"
+    leverage: "Leverage: {leverage}x"
+    strategy_section: "📊 STRATEGY SETTINGS:"
+    strategy_name: "Strategy: {name}"
+    confidence_threshold: "Confidence threshold: {threshold}"
+    risk_section: "🛡️ RISK MANAGEMENT:"
+    max_position_size: "Max position size: {size} BTC"
+    max_loss_percent: "Max loss: {percent}%"
+    back_section: "🔙 BACK:"
+    back_option: "Return to main menu"
+    choice_prompt: "Your choice (0-7): "
+    invalid_choice: "❌ Invalid choice. Please select 0-7."
+    next_version_notice: "⚠️ Settings changes will be available in the next version."
+    continue_prompt: "Press Enter to continue..."
+    current_value: "Current value"
+    enter_new_value: "Enter new value"
+    valid_values: "Valid values"
+    value_updated: "Value successfully updated"
+    invalid_value: "Invalid value"
+    value_out_of_range: "Value out of allowed range"
+    value_must_be_positive: "Value must be positive"
   
   settings:
     title: "Settings"

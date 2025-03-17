@@ -12,6 +12,7 @@ import random
 from typing import Dict, Any, List, Optional, Union
 import asyncio
 from datetime import datetime
+import math
 
 from visualization.base import BaseVisualizer
 from core.localization import LocalizationManager
@@ -117,8 +118,16 @@ class ConsoleVisualizer(BaseVisualizer):
         Returns:
             True, если данные успешно обновлены, иначе False
         """
+        if not hasattr(self, 'price_history'):
+            self.price_history = []
+            
         try:
             with self._data_lock:
+                # Проверка на корректность данных
+                if price is None or not isinstance(price, (int, float)) or math.isnan(price):
+                    self.logger.warning(f"Некорректное значение цены: {price}")
+                    return False
+                    
                 self.price_history.append(float(price))
                 # Ограничиваем размер истории цен
                 if len(self.price_history) > 100:
@@ -127,6 +136,8 @@ class ConsoleVisualizer(BaseVisualizer):
             return True
         except Exception as e:
             self.logger.error(f"Ошибка при обновлении цены: {str(e)}")
+            import traceback
+            self.logger.debug(traceback.format_exc())
             return False
             
     def update_indicators(self, indicators: Dict[str, Any]) -> bool:

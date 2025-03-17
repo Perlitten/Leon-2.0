@@ -1,12 +1,11 @@
 """
-Модуль обучения моделей машинного обучения.
+Модуль обучения моделей для Leon Trading Bot.
 
-Предоставляет классы и функции для обучения моделей,
-подбора гиперпараметров и оптимизации моделей.
+Предоставляет классы и функции для обучения и валидации моделей.
 """
 
-from .model_trainer import ModelTrainer
+from .trainer import ModelTrainer
+from .model_validator import ModelValidator
+from .visualization import ModelVisualizer
 
-__all__ = [
-    'ModelTrainer'
-] 
+__all__ = ['ModelTrainer', 'ModelValidator', 'ModelVisualizer'] 

@@ -7,7 +7,7 @@
 
 import numpy as np
 import pandas as pd
-from typing import Dict, Any, List, Optional, Union, Tuple, Type
+from typing import Dict, Any, List, Optional, Union, Tuple, Type, Callable
 import logging
 import os
 import json

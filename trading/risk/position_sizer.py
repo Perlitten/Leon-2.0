@@ -10,13 +10,11 @@ from typing import Dict, Any, Optional
 
 class PositionSizer:
     """
-    Класс для расчета размера позиции на основе различных методов управления рисками.
+    Класс для расчета размера позиции.
     
-    Поддерживает следующие методы:
-    - Фиксированный процент от баланса
-    - Фиксированный риск на сделку
-    - Фиксированный размер позиции
-    - Метод Келли
+    Предоставляет методы для расчета размера позиции на основе различных
+    подходов к управлению рисками, таких как фиксированный риск,
+    фиксированный процент от баланса, фиксированный размер позиции и др.
     """
     
     def __init__(self, default_method: str = "fixed_risk", default_params: Dict[str, Any] = None):
@@ -25,34 +23,21 @@ class PositionSizer:
         
         Args:
             default_method: Метод расчета по умолчанию
-                ("fixed_risk", "fixed_percent", "fixed_size", "kelly")
             default_params: Параметры метода по умолчанию
         """
         self.logger = logging.getLogger(self.__class__.__name__)
-        
         self.default_method = default_method
-        self.default_params = default_params or {}
+        self.default_params = default_params or {"risk_percent": 1.0}
         
-        # Проверка метода по умолчанию
-        if default_method not in ["fixed_risk", "fixed_percent", "fixed_size", "kelly"]:
-            self.logger.warning(f"Неизвестный метод расчета размера позиции: {default_method}. Используется fixed_risk.")
-            self.default_method = "fixed_risk"
+        # Словарь доступных методов расчета
+        self.methods = {
+            "fixed_risk": self._calculate_fixed_risk,
+            "fixed_percent": self._calculate_fixed_percent,
+            "fixed_size": self._calculate_fixed_size,
+            "kelly": self._calculate_kelly
+        }
         
-        # Установка параметров по умолчанию, если не указаны
-        if "risk_per_trade" not in self.default_params:
-            self.default_params["risk_per_trade"] = 2.0  # 2% риска на сделку
-        
-        if "position_size" not in self.default_params:
-            self.default_params["position_size"] = 0.001  # 0.001 BTC
-        
-        if "percent" not in self.default_params:
-            self.default_params["percent"] = 5.0  # 5% от баланса
-        
-        if "win_rate" not in self.default_params:
-            self.default_params["win_rate"] = 0.5  # 50% вероятность выигрыша
-        
-        if "win_loss_ratio" not in self.default_params:
-            self.default_params["win_loss_ratio"] = 1.5  # Соотношение выигрыша к проигрышу
+        self.logger.info(f"Инициализирован калькулятор размера позиции (метод: {default_method})")
     
     def calculate(self, balance: float, entry_price: float, stop_loss: float, 
                  method: Optional[str] = None, params: Optional[Dict[str, Any]] = None) -> float:
@@ -63,38 +48,43 @@ class PositionSizer:
             balance: Доступный баланс
             entry_price: Цена входа
             stop_loss: Цена стоп-лосса
-            method: Метод расчета
-                ("fixed_risk", "fixed_percent", "fixed_size", "kelly")
-            params: Параметры метода
+            method: Метод расчета (если None, используется метод по умолчанию)
+            params: Параметры метода (если None, используются параметры по умолчанию)
             
         Returns:
-            Размер позиции
+            float: Размер позиции
+            
+        Raises:
+            ValueError: Если указан неизвестный метод расчета
         """
-        # Использование метода и параметров по умолчанию, если не указаны
+        # Определение метода расчета
         method = method or self.default_method
         
-        # Объединение параметров по умолчанию и переданных параметров
-        all_params = self.default_params.copy()
-        if params:
-            all_params.update(params)
+        # Проверка наличия метода
+        if method not in self.methods:
+            self.logger.error(f"Неизвестный метод расчета размера позиции: {method}")
+            raise ValueError(f"Неизвестный метод расчета размера позиции: {method}")
         
-        # Расчет размера позиции в зависимости от метода
-        if method == "fixed_risk":
-            return self._calculate_fixed_risk(balance, entry_price, stop_loss, all_params)
-        elif method == "fixed_percent":
-            return self._calculate_fixed_percent(balance, entry_price, all_params)
-        elif method == "fixed_size":
-            return self._calculate_fixed_size(all_params)
-        elif method == "kelly":
-            return self._calculate_kelly(balance, entry_price, stop_loss, all_params)
-        else:
-            self.logger.warning(f"Неизвестный метод расчета размера позиции: {method}. Используется fixed_risk.")
-            return self._calculate_fixed_risk(balance, entry_price, stop_loss, all_params)
+        # Определение параметров
+        params = params or self.default_params
+        
+        # Расчет размера позиции
+        position_size = self.methods[method](balance, entry_price, stop_loss, params)
+        
+        # Проверка на отрицательный размер позиции
+        if position_size < 0:
+            self.logger.warning("Рассчитан отрицательный размер позиции, установлено значение 0")
+            position_size = 0
+        
+        return position_size
     
     def _calculate_fixed_risk(self, balance: float, entry_price: float, stop_loss: float, 
                              params: Dict[str, Any]) -> float:
         """
-        Расчет размера позиции на основе фиксированного риска на сделку.
+        Расчет размера позиции на основе фиксированного риска.
+        
+        Размер позиции рассчитывается таким образом, чтобы при срабатывании
+        стоп-лосса убыток составил заданный процент от баланса.
         
         Args:
             balance: Доступный баланс
@@ -103,24 +93,30 @@ class PositionSizer:
             params: Параметры метода
             
         Returns:
-            Размер позиции
+            float: Размер позиции
         """
-        risk_per_trade = params.get("risk_per_trade", 2.0)  # Процент риска на сделку
+        # Получение процента риска
+        risk_percent = params.get("risk_percent", 1.0)
         
         # Расчет риска в абсолютных единицах
-        risk_amount = balance * (risk_per_trade / 100)
+        risk_amount = balance * (risk_percent / 100)
         
-        # Расчет размера позиции на основе риска и стоп-лосса
+        # Расчет размера позиции
         price_diff = abs(entry_price - stop_loss)
+        
+        # Проверка на нулевую разницу цен
         if price_diff == 0:
-            self.logger.warning("Разница между ценой входа и стоп-лоссом равна 0. Используется минимальный размер позиции.")
-            return 0.001  # Минимальный размер позиции
+            self.logger.warning("Нулевая разница между ценой входа и стоп-лоссом")
+            return 0
         
         position_size = risk_amount / price_diff
         
+        self.logger.debug(f"Расчет размера позиции (fixed_risk): баланс={balance}, "
+                         f"риск={risk_percent}%, размер={position_size}")
+        
         return position_size
     
-    def _calculate_fixed_percent(self, balance: float, entry_price: float, 
+    def _calculate_fixed_percent(self, balance: float, entry_price: float, stop_loss: float, 
                                 params: Dict[str, Any]) -> float:
         """
         Расчет размера позиции на основе фиксированного процента от баланса.
@@ -128,35 +124,49 @@ class PositionSizer:
         Args:
             balance: Доступный баланс
             entry_price: Цена входа
+            stop_loss: Цена стоп-лосса (не используется)
             params: Параметры метода
             
         Returns:
-            Размер позиции
+            float: Размер позиции
         """
-        percent = params.get("percent", 5.0)  # Процент от баланса
+        # Получение процента от баланса
+        percent = params.get("percent", 5.0)
         
         # Расчет размера позиции
         position_value = balance * (percent / 100)
         position_size = position_value / entry_price
         
+        self.logger.debug(f"Расчет размера позиции (fixed_percent): баланс={balance}, "
+                         f"процент={percent}%, размер={position_size}")
+        
         return position_size
     
-    def _calculate_fixed_size(self, params: Dict[str, Any]) -> float:
+    def _calculate_fixed_size(self, balance: float, entry_price: float, stop_loss: float, 
+                             params: Dict[str, Any]) -> float:
         """
-        Возвращает фиксированный размер позиции.
+        Расчет фиксированного размера позиции.
         
         Args:
+            balance: Доступный баланс (не используется)
+            entry_price: Цена входа (не используется)
+            stop_loss: Цена стоп-лосса (не используется)
             params: Параметры метода
             
         Returns:
-            Размер позиции
+            float: Размер позиции
         """
-        return params.get("position_size", 0.001)
+        # Получение фиксированного размера
+        size = params.get("size", 0.01)
+        
+        self.logger.debug(f"Расчет размера позиции (fixed_size): размер={size}")
+        
+        return size
     
     def _calculate_kelly(self, balance: float, entry_price: float, stop_loss: float, 
                         params: Dict[str, Any]) -> float:
         """
-        Расчет размера позиции на основе критерия Келли.
+        Расчет размера позиции по формуле Келли.
         
         Args:
             balance: Доступный баланс
@@ -165,19 +175,33 @@ class PositionSizer:
             params: Параметры метода
             
         Returns:
-            Размер позиции
+            float: Размер позиции
         """
-        win_rate = params.get("win_rate", 0.5)  # Вероятность выигрыша
-        win_loss_ratio = params.get("win_loss_ratio", 1.5)  # Соотношение выигрыша к проигрышу
+        # Получение параметров
+        win_rate = params.get("win_rate", 0.5)
+        win_loss_ratio = params.get("win_loss_ratio", 2.0)
+        max_risk = params.get("max_risk", 5.0)  # Максимальный риск в процентах
         
-        # Расчет доли капитала по формуле Келли
+        # Расчет доли по формуле Келли
         kelly_fraction = win_rate - ((1 - win_rate) / win_loss_ratio)
         
-        # Ограничение доли капитала
-        kelly_fraction = max(0, min(kelly_fraction, 0.25))  # Не более 25% капитала
+        # Ограничение доли
+        kelly_fraction = max(0, min(kelly_fraction, max_risk / 100))
+        
+        # Расчет риска в абсолютных единицах
+        risk_amount = balance * kelly_fraction
         
         # Расчет размера позиции
-        position_value = balance * kelly_fraction
-        position_size = position_value / entry_price
+        price_diff = abs(entry_price - stop_loss)
+        
+        # Проверка на нулевую разницу цен
+        if price_diff == 0:
+            self.logger.warning("Нулевая разница между ценой входа и стоп-лоссом")
+            return 0
+        
+        position_size = risk_amount / price_diff
+        
+        self.logger.debug(f"Расчет размера позиции (kelly): баланс={balance}, "
+                         f"доля Келли={kelly_fraction}, размер={position_size}")
         
         return position_size 

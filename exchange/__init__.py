@@ -5,6 +5,6 @@
 """
 
 from exchange.base import ExchangeBase
-from exchange.binance.client import BinanceClient
+from exchange.binance.client import BinanceIntegration
 
-__all__ = ['ExchangeBase', 'BinanceClient'] 
+__all__ = ['ExchangeBase', 'BinanceIntegration'] 

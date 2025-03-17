@@ -1,54 +1,33 @@
 """
-Модуль машинного обучения.
+Модуль машинного обучения для Leon Trading Bot.
 
-Предоставляет классы и функции для работы с моделями машинного обучения,
-включая создание, обучение, оценку, визуализацию и управление моделями.
+Этот модуль предоставляет компоненты для работы с ML-моделями,
+включая обучение, валидацию, предсказание и принятие решений.
 """
 
-from .models import (
-    BaseModel,
-    RegressionModel,
-    ClassificationModel,
-    EnsembleModel,
-    TimeSeriesModel,
-    ModelFactory,
-    ModelManager
-)
+# Импорт основных компонентов
+# from ml.model_factory import ModelFactory
+# from ml.model_manager import ModelManager
+# from ml.model_evaluator import ModelEvaluator
+# from ml.feature_extractor import FeatureExtractor
+from ml.decision_maker import DecisionMaker
 
-from .preprocessing import (
-    DataPreprocessor,
-    FeatureSelector,
-    FeatureEngineer
-)
-
-from .validation import (
-    ModelValidator,
-    ModelVisualizer
-)
-
-from .training import (
-    ModelTrainer
-)
+# Импорт подмодулей
+# from ml import models
+# from ml import training
+# from ml import validation
+# from ml import features
+# from ml import preprocessing
 
 __all__ = [
-    # Модели
-    'BaseModel',
-    'RegressionModel',
-    'ClassificationModel',
-    'EnsembleModel',
-    'TimeSeriesModel',
-    'ModelFactory',
-    'ModelManager',
-    
-    # Предобработка данных
-    'DataPreprocessor',
-    'FeatureSelector',
-    'FeatureEngineer',
-    
-    # Валидация и визуализация
-    'ModelValidator',
-    'ModelVisualizer',
-    
-    # Обучение
-    'ModelTrainer'
+    # 'ModelFactory',
+    # 'ModelManager',
+    # 'ModelEvaluator',
+    # 'FeatureExtractor',
+    'DecisionMaker',
+    # 'models',
+    # 'training',
+    # 'validation',
+    # 'features',
+    # 'preprocessing'
 ] 

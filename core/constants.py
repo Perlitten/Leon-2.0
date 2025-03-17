@@ -162,24 +162,91 @@ LOG_LEVELS = {
 }
 
 # Константы для Telegram бота
+TELEGRAM_COMMANDS = {
+    "START": "start",
+    "HELP": "help",
+    "STATUS": "status",
+    "MODE": "mode",
+    "TRADE": "trade",
+    "SETTINGS": "settings"
+}
+
+TELEGRAM_BUTTONS = {
+    "STATUS": "status",
+    "HELP": "help",
+    "MODES": "modes",
+    "TRADE": "trade",
+    "BACK_TO_MAIN": "back_to_main"
+}
+
+# Константы для кнопок управления ботом
+PAUSE_BOT = "pause_bot"
+RESUME_BOT = "resume_bot"
+STOP_BOT = "stop_bot"
+RESTART_BOT = "restart_bot"
+TRAIN_MODEL = "train_model"
+SKIP_TRAINING = "skip_training"
+
+# Константы для подтверждения действий
+CONFIRM_STOP = "confirm_stop"
+CANCEL_STOP = "cancel_stop"
+CONFIRM_RESTART = "confirm_restart"
+CANCEL_RESTART = "cancel_restart"
+
 class TelegramCommands:
     """Команды Telegram бота."""
-    START = "start"
-    HELP = "help"
-    STATUS = "status"
-    TRADE = "trade"
+    START = TELEGRAM_COMMANDS["START"]
+    HELP = TELEGRAM_COMMANDS["HELP"]
+    STATUS = TELEGRAM_COMMANDS["STATUS"]
+    TRADE = TELEGRAM_COMMANDS["TRADE"]
     BALANCE = "balance"
     POSITIONS = "positions"
-    MODE = "mode"
+    MODE = TELEGRAM_COMMANDS["MODE"]
 
 class TelegramCallbacks:
     """Колбэки для кнопок Telegram бота."""
-    STATUS = "status"
-    HELP = "help"
-    MODES = "modes"
-    TRADE = "trade"
-    BACK_TO_MAIN = "back_to_main"
+    STATUS = TELEGRAM_BUTTONS["STATUS"]
+    HELP = TELEGRAM_BUTTONS["HELP"]
+    MODES = TELEGRAM_BUTTONS["MODES"]
+    TRADE = TELEGRAM_BUTTONS["TRADE"]
+    BACK_TO_MAIN = TELEGRAM_BUTTONS["BACK_TO_MAIN"]
     OPEN_LONG = "open_long"
     OPEN_SHORT = "open_short"
     CLOSE_ALL = "close_all"
-    SET_MODE_PREFIX = "set_mode_" 
+    SET_MODE_PREFIX = "set_mode_"
+    
+    # Новые колбэки для управления ботом
+    PAUSE_BOT = PAUSE_BOT
+    RESUME_BOT = RESUME_BOT
+    STOP_BOT = STOP_BOT
+    RESTART_BOT = RESTART_BOT
+    TRAIN_MODEL = TRAIN_MODEL
+    SKIP_TRAINING = SKIP_TRAINING
+
+class TradingModes:
+    """Режимы торговли."""
+    DRY = TRADING_MODES["DRY"]
+    BACKTEST = TRADING_MODES["BACKTEST"]
+    REAL = TRADING_MODES["REAL"]
+
+class EventTypes:
+    """Типы событий."""
+    SYSTEM_STARTED = EVENT_TYPES["SYSTEM_STARTED"]
+    SYSTEM_STOPPED = EVENT_TYPES["SYSTEM_STOPPED"]
+    MODE_CHANGED = EVENT_TYPES["MODE_CHANGED"]
+    TRADE_EXECUTED = EVENT_TYPES["TRADE_EXECUTED"]
+    POSITION_OPENED = EVENT_TYPES["POSITION_OPENED"]
+    POSITION_CLOSED = EVENT_TYPES["POSITION_CLOSED"]
+    POSITION_UPDATED = EVENT_TYPES["POSITION_UPDATED"]
+    PRICE_UPDATED = EVENT_TYPES["PRICE_UPDATED"]
+    BALANCE_UPDATED = EVENT_TYPES["BALANCE_UPDATED"]
+    ERROR_OCCURRED = EVENT_TYPES["ERROR_OCCURRED"]
+    MODEL_LOADED = EVENT_TYPES["MODEL_LOADED"]
+    PREDICTION_RECEIVED = EVENT_TYPES["PREDICTION_RECEIVED"]
+    MODEL_EVALUATED = EVENT_TYPES["MODEL_EVALUATED"]
+    TRADE_COMPLETED = EVENT_TYPES["TRADE_COMPLETED"]
+
+class TradeDirections:
+    """Направления сделок."""
+    BUY = TRADE_DIRECTIONS["BUY"]
+    SELL = TRADE_DIRECTIONS["SELL"] 

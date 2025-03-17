@@ -24,7 +24,7 @@ class ComponentFactory:
     def __init__(self, config: Dict[str, Any]):
         """
         Инициализация фабрики компонентов.
-        
+    
         Args:
             config: Конфигурация системы
         """
@@ -80,40 +80,60 @@ class NotificationFactory(ComponentFactory):
     Фабрика для создания компонентов уведомлений.
     """
     
-    def create_telegram_integration(self) -> Optional[Any]:
+    async def create_telegram_integration(self) -> Any:
         """
-        Создает интеграцию с Telegram, если предоставлены необходимые параметры.
+        Создает и инициализирует интеграцию с Telegram.
         
         Returns:
-            TelegramIntegration или None: Интеграция или None, если не настроена
+            TelegramIntegration: Инициализированная интеграция с Telegram
             
         Raises:
             InitializationError: При ошибке инициализации интеграции
         """
         try:
-            bot_token = self.config["telegram"]["bot_token"]
-            chat_id = self.config["telegram"]["chat_id"]
+            # Проверяем, включена ли Telegram интеграция
+            if not self.config.get("telegram", {}).get("enabled", False):
+                self.logger.info("Telegram интеграция отключена в конфигурации")
+                return None
+            
+            # Получаем токен и chat_id из конфигурации
+            bot_token = self.config.get("telegram", {}).get("bot_token", "")
+            chat_id = self.config.get("telegram", {}).get("chat_id", "")
             
             if not bot_token or not chat_id:
-                self.logger.info("Telegram интеграция не настроена, уведомления отключены")
+                self.logger.warning("Не указаны токен или chat_id для Telegram интеграции")
                 return None
             
-            # Логирование с маскированным токеном для безопасности
-            self.logger.info(f"Инициализация Telegram интеграции с токеном: {mask_sensitive_data(bot_token)}")
+            # Маскируем токен для логирования
+            masked_token = mask_sensitive_data(bot_token)
+            self.logger.info(f"Инициализация Telegram интеграции с токеном: {masked_token}")
             
+            # Создаем интеграцию
             from notification.telegram_bot import TelegramIntegration
-            telegram = TelegramIntegration(bot_token, chat_id)
+            telegram = TelegramIntegration(bot_token, chat_id, None)
             
-            # Проверяем, что интеграция успешно подключилась
-            if not telegram.connected:
-                self.logger.error("Не удалось подключиться к Telegram API. Проверьте токен и подключение к интернету.")
+            # Инициализируем интеграцию
+            success = await telegram.initialize()
+            
+            if not success:
+                self.logger.warning("Не удалось инициализировать Telegram интеграцию")
                 return None
                 
+            # Проверяем, что интеграция успешно подключена
+            if not telegram.connected:
+                self.logger.warning("Telegram интеграция не подключена")
+                return None
+                
+            # Отправляем тестовое сообщение
+            test_message = "🤖 *Leon Trading Bot* запускается..."
+            await telegram.send_message(test_message)
+            self.logger.info("Отправлено тестовое сообщение в Telegram")
+            
             return telegram
         except Exception as e:
             self.logger.error(f"Ошибка при создании Telegram интеграции: {str(e)}")
             self.logger.debug(traceback.format_exc())
-            raise InitializationError(f"Ошибка при создании Telegram интеграции: {str(e)}", component="TelegramIntegration") from e
+            return None
 
 
 class TradingFactory(ComponentFactory):
@@ -133,24 +153,26 @@ class TradingFactory(ComponentFactory):
         """
         try:
             strategy_config = self.config["strategy"]
+            strategy_params = strategy_config.get("params", {})
             
             self.logger.info("Инициализация торговой стратегии")
             
-            # Создаем конфигурацию для стратегии
+            # Создаем конфигурацию для стратегии с параметрами по умолчанию, если они не указаны
             from trading.strategies.base import StrategyConfig
             config = StrategyConfig(
-                stop_loss=strategy_config["stop_loss"],
-                take_profit=strategy_config["take_profit"],
-                risk_per_trade=strategy_config["risk_per_trade"],
-                use_trailing_stop=strategy_config["use_trailing_stop"],
-                trailing_stop_activation=strategy_config["trailing_stop_activation"]
+                stop_loss=strategy_params.get("stop_loss", 2.0),
+                take_profit=strategy_params.get("take_profit", 3.0),
+                risk_per_trade=self.config["risk"].get("max_loss_percent", 1.0),
+                use_trailing_stop=strategy_params.get("use_trailing_stop", False),
+                trailing_stop_activation=strategy_params.get("trailing_stop_activation", 0.5)
             )
             
             # Создаем стратегию с правильными аргументами
-            from trading.strategies.scalping import ScalpingStrategy
-            strategy = ScalpingStrategy(
+            from trading.strategies.simple_ma import SimpleMAStrategy
+            strategy = SimpleMAStrategy(
                 symbol=self.config["general"]["symbol"],
-                config=config
+                timeframe=self.config["general"]["kline_interval"],
+                params=strategy_params
             )
             
             return strategy
@@ -173,14 +195,20 @@ class TradingFactory(ComponentFactory):
             self.logger.info("Инициализация контроллера рисков")
             
             # Получаем параметры риска из конфигурации
-            risk_params = {
-                "max_daily_loss": self.config["safety"]["max_daily_loss"],
-                "max_daily_trades": self.config["safety"]["max_daily_trades"]
-            }
+            max_daily_loss = self.config["safety"].get("max_daily_loss", 5.0)
+            max_daily_trades = self.config["safety"].get("max_daily_trades", 10)
             
             # Создаем и возвращаем контроллер рисков
-            from trading.risk.risk_manager import create_risk_controller
-            return create_risk_controller(**risk_params)
+            from trading.risk import create_risk_controller
+            risk_controller = create_risk_controller(
+                max_daily_loss=max_daily_loss,
+                max_daily_trades=max_daily_trades
+            )
+            
+            # Логируем успешное создание
+            self.logger.info(f"Контроллер рисков создан успешно: max_daily_loss={max_daily_loss}%, max_daily_trades={max_daily_trades}")
+            
+            return risk_controller
         except Exception as e:
             self.logger.error(f"Ошибка при создании контроллера рисков: {str(e)}")
             self.logger.debug(traceback.format_exc())
@@ -232,51 +260,30 @@ class VisualizationFactory(ComponentFactory):
     
     def create_visualizer(self) -> Any:
         """
-        Создает консольный визуализатор.
+        Создает и возвращает визуализатор для отображения информации о торговле.
         
         Returns:
-            ConsoleVisualizer: Экземпляр визуализатора
-            
-        Raises:
-            InitializationError: При ошибке создания визуализатора
+            ConsoleVisualizer: Экземпляр визуализатора.
         """
         try:
             self.logger.info("Инициализация консольной визуализации")
             
-            symbol = self.config["general"]["symbol"]
-            initial_balance = self.config["general"]["initial_balance"]
-            leverage = self.config["general"]["leverage"]
-            risk_per_trade = self.config["strategy"]["risk_per_trade"]
-            stop_loss = self.config["strategy"]["stop_loss"]
-            take_profit = self.config["strategy"]["take_profit"]
+            # Создаем базовую конфигурацию для визуализатора
+            viz_config = {}
+            if "visualization" in self.config:
+                viz_config = self.config["visualization"]
             
             from visualization.console_ui import ConsoleVisualizer
-            visualizer = ConsoleVisualizer(
-                symbol=symbol,
-                initial_balance=initial_balance,
-                leverage=leverage,
-                risk_per_trade=risk_per_trade,
-                stop_loss=stop_loss, 
-                take_profit=take_profit
-            )
+            visualizer = ConsoleVisualizer(name="console", config=viz_config)
             
             # Добавляем дополнительные параметры из конфигурации
             if "visualization" in self.config:
-                viz_config = self.config["visualization"]
-                visualizer.use_ascii = viz_config.get("use_ascii", True)
-                
                 # Устанавливаем язык, если указан в конфигурации
                 if "language" in viz_config:
                     language = viz_config.get("language", "en")
                     self.logger.info(f"Установка языка визуализации: {language}")
-                    visualizer.set_language(language)
-                
-                # Добавляем конфигурацию в визуализатор
-                visualizer.config = viz_config
-            
-            # Инициализируем дополнительные атрибуты для ML
-            visualizer.ml_predictions = None
-            visualizer.ml_metrics = None
+                    if hasattr(visualizer, 'set_language'):
+                        visualizer.set_language(language)
             
             return visualizer
         except Exception as e:
@@ -329,4 +336,4 @@ class MLFactory(ComponentFactory):
         except Exception as e:
             self.logger.error(f"Ошибка при создании компонента принятия решений: {str(e)}")
             self.logger.debug(traceback.format_exc())
-            raise InitializationError(f"Ошибка при создании компонента принятия решений: {str(e)}", component="DecisionMaker") from e 
+            raise InitializationError(f"Ошибка при создании компонента принятия решений: {str(e)}", component="DecisionMaker") from e

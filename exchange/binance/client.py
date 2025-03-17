@@ -16,7 +16,7 @@ from typing import Dict, Any, Optional, List, Union
 
 from exchange.base import ExchangeBase
 
-class BinanceClient(ExchangeBase):
+class BinanceIntegration(ExchangeBase):
     """
     Клиент для работы с Binance API.
     Поддерживает как REST API, так и WebSocket соединения.
@@ -385,6 +385,35 @@ class BinanceClient(ExchangeBase):
             if callback:
                 await self._subscribe_to_stream(stream_name, callback)
 
+    async def get_balance(self) -> float:
+        """
+        Получение текущего баланса аккаунта в USDT.
+        
+        Returns:
+            float: Текущий баланс в USDT
+        """
+        try:
+            # Если API ключи не предоставлены, возвращаем тестовый баланс
+            if not self.api_key or not self.api_secret:
+                self.logger.info("API ключи не предоставлены, возвращается тестовый баланс")
+                return 1000.0
+            
+            # Получение информации об аккаунте
+            account_info = await self.get_account_info()
+            
+            # Поиск баланса USDT
+            usdt_balance = 0.0
+            for asset in account_info.get("balances", []):
+                if asset["asset"] == "USDT":
+                    usdt_balance = float(asset["free"])
+                    break
+            
+            self.logger.info(f"Получен баланс: {usdt_balance} USDT")
+            return usdt_balance
+        except Exception as e:
+            self.logger.error(f"Ошибка при получении баланса: {e}")
+            return 0.0
+
 
 # Пример использования
 if __name__ == "__main__":
@@ -405,7 +434,7 @@ if __name__ == "__main__":
     
     async def main():
         # Создание клиента Binance
-        client = BinanceClient(api_key, api_secret)
+        client = BinanceIntegration(api_key, api_secret)
         
         try:
             # Инициализация клиента

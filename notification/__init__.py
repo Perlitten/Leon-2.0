@@ -5,5 +5,6 @@
 """
 
 from notification.telegram.bot import TelegramBot
+from notification.telegram_bot import TelegramIntegration
 
-__all__ = ['TelegramBot'] 
+__all__ = ['TelegramBot', 'TelegramIntegration'] 

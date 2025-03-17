@@ -4,6 +4,6 @@
 Предоставляет классы и функции для взаимодействия с биржей Binance.
 """
 
-from exchange.binance.client import BinanceClient
+from exchange.binance.client import BinanceIntegration
 
-__all__ = ['BinanceClient'] 
+__all__ = ['BinanceIntegration'] 
