@@ -189,7 +189,10 @@ class LocalizationManager:
             return
         
         try:
-            os.makedirs(os.path.dirname(file_path), exist_ok=True)
+            # Убедимся, что директория существует
+            # Используем self.locales_dir вместо os.path.dirname(file_path)
+            os.makedirs(self.locales_dir, exist_ok=True)
+            
             with open(file_path, 'w', encoding='utf-8') as file:
                 yaml.dump(default_texts, file, allow_unicode=True, sort_keys=False)
             
@@ -302,6 +305,9 @@ class LocalizationManager:
         file_path = os.path.join(self.locales_dir, f"{language}.yaml")
         
         try:
+            # Убедимся, что директория существует
+            os.makedirs(self.locales_dir, exist_ok=True)
+            
             with open(file_path, 'w', encoding='utf-8') as file:
                 yaml.dump(self.texts[language], file, allow_unicode=True, sort_keys=False)
             
@@ -448,6 +454,9 @@ class LocalizationManager:
         file_path = os.path.join(self.locales_dir, f"{language}.yaml")
         
         try:
+            # Убедимся, что директория существует
+            os.makedirs(self.locales_dir, exist_ok=True)
+            
             with open(file_path, 'w', encoding='utf-8') as file:
                 yaml.dump(self.texts[language], file, default_flow_style=False, allow_unicode=True)
             
